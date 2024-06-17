@@ -6,17 +6,17 @@ contract Interval {
 contract UpDown {
     input  tick : bool
     output cnt  : int
-
+    
     history cnt(1)
 
-    uP -> uP ::  tick ==> -0sd32_128 < cnt & h_cnt_1 < cnt & cnt < 0sd32_128
-    uP -> uP :: ! tick ==> h_cnt_1 = cnt
+    UP -> UP ::  te < 1020 & tick ==> -0sd32_128 < cnt & h_cnt_1 < cnt & cnt < 0sd32_128
+    UP -> UP :: ! tick ==> h_cnt_1 = cnt
 
     DOWN -> DOWN ::  tick ==> h_cnt_1 > cnt & cnt > -0sd32_128
     DOWN -> DOWN :: ! tick ==> h_cnt_1 = cnt
 
-    uP -> DOWN :: tick ==> cnt = 0sd32_128
-    DOWN -> uP :: tick ==> cnt =-0sd32_128
+    UP -> DOWN :: te < 1020 & tick ==> cnt = 0sd32_128
+    DOWN -> UP :: tick ==> cnt =-0sd32_128
 
     contract Interval[y <- cnt]
 }
@@ -31,14 +31,15 @@ reactor Counter  {
 
     {=
         if(tick) {
-        if(!down) {
-            val += 1;
-        } else {
-            val -= 1;
-        }
+			if(!down) {
+				val += 1;
+			} else {
+				val -= 1;
+			}
 
-        if(val == 128 || val == -128) down = !down;
+			if(val == 128 || val == -128) down = !down;
         }
+		std::this_thread::sleep_for(std::chrono::milliseconds(std::rand() % 50));
     =}
 }
 

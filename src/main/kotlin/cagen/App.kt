@@ -4,6 +4,7 @@ package cagen
 
 import cagen.Util.infoln
 import cagen.code.CCodeUtils
+import cagen.code.CppGen
 import cagen.draw.Dot
 import cagen.draw.TikzPrinter
 import com.github.ajalt.clikt.core.*
@@ -226,6 +227,39 @@ class Verify : CliktCommand() {
     }
 }
 
+class Rca : CliktCommand() {
+    val outputFolder by option("-o", "--output").file().default(File("rca_output"))
+    val inputFile by argument("SYSTEM")
+        .file(mustExist = true, canBeDir = false, mustBeReadable = true)
+    val context by requireObject<AppContext>()
+
+
+    override fun run() {
+        val (sys) = context.load(inputFile)
+
+        sys.forEach{
+            if(it.signature.outputs.none{ v -> v.name == "te"}){
+                it.signature.outputs.addLast(Variable("te", BuiltInType("int")))
+            }
+
+            if(it.signature.outputs.none{ v -> v.name == "ts"}){
+                it.signature.outputs.addLast(Variable("ts", BuiltInType("int")))
+            }
+            it.contracts.forEach{ c ->
+                if(c.contract.signature.outputs.none{ v -> v.name == "ts"}){
+                    c.contract.signature.outputs.addLast(Variable("ts", BuiltInType("int")))
+                }
+                if(c.contract.signature.outputs.none{ v -> v.name == "te"}){
+                    c.contract.signature.outputs.addLast(Variable("te", BuiltInType("int")))
+                }
+                CppGen.writeRuntimeMonitor(c, outputFolder.toPath())
+            }
+            CppGen.writeSystemTu(it, outputFolder.toPath())
+            CppGen.writeSystemHeader(it, outputFolder.toPath())
+        }
+    }
+}
+
 fun main(args: Array<String>) = Tool()
-    .subcommands(ExtractCode(), DotCommand(), TikzCommand(), Verify(), ConstructCA(), VVSlice())
+    .subcommands(ExtractCode(), DotCommand(), TikzCommand(), Verify(), ConstructCA(), VVSlice(), Rca())
     .main(args)
