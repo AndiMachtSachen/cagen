@@ -33,7 +33,7 @@ version: VERSION;
 prepost: CONTRACT name=ident ASSIGN pre=expr STRONG_ARROW post=expr;
 
 transition: vvguard? from=ident ARROW to=ident DOUBLE_COLUMN
-    (contr=ident| pre=expr STRONG_ARROW post=expr);
+    (contr=ident| pre=expr STRONG_ARROW post=expr) (HASH (clocks+=ident))*;
 
 
 system: REACTOR name=ident LBRACE
@@ -56,7 +56,8 @@ subst: local=ident BARROW from=ioport;
 
 defines: DEFINES LBRACE variable+ RBRACE;
 
-io: type=(INPUT|OUTPUT|STATE) variable (COMMA variable)*;
+io: type=(INPUT|OUTPUT|STATE|CLOCK) variable (COMMA variable)*;
+
 history: HISTORY n=ident LPAREN INT RPAREN;
 
 variable: n+=ident (COMMA n+=ident)* COLON t=ident (':=' init=expr)?;
@@ -136,7 +137,7 @@ RBRACE: '}';
 LBRACE: '{';
 LBRACKET:'[';
 RBRACKET:']';
-
+HASH: '#';
 
 WS: [ \n\f\r\t]+ -> skip;
 COMMENT: '//' (~[\n\r]+) -> skip;
@@ -149,6 +150,7 @@ HISTORY : 'history' ;
 INPUT: 'input';
 OUTPUT: 'output';
 STATE: 'state';
+CLOCK: 'clock';
 ARROW: '->';
 BARROW: '<-';
 COLON: ':';

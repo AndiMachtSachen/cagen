@@ -75,8 +75,8 @@ class ModelLevel(val model: Model) {
     ) : SignatureLevel {
         fun build(): Contract = Contract(name, signature, history, transitions, parent)
 
-        fun trans(from: String, to: String, pre: SMVExpr, post: SMVExpr): CATransition {
-            val t = CATransition("", from, to, VVGuard.DEFAULT, PrePost(pre, post))
+        fun trans(from: String, to: String, pre: SMVExpr, post: SMVExpr, clocks : List<String> = emptyList()): CATransition {
+            val t = CATransition("", from, to, VVGuard.DEFAULT, PrePost(pre, post), clocks.toMutableList())
             transitions.add(t)
             return t
         }

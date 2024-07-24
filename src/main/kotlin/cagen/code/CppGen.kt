@@ -3,6 +3,7 @@ package cagen.code
 import cagen.*
 import cagen.code.CCodeUtils.applySubst
 import cagen.code.CCodeUtilsSimplified.toC
+import cagen.code.CCodeUtilsSimplified.toCExpr
 import java.nio.file.Path
 import kotlin.io.path.createFile
 import kotlin.io.path.div
@@ -10,8 +11,8 @@ import kotlin.io.path.exists
 import kotlin.io.path.writeText
 
 object CppGen {
-    val headerExtension = ".hpp"
-    val sourceExtension = ".cpp"
+    const val headerExtension = ".hpp"
+    const val sourceExtension = ".cpp"
 
     private fun writeCode(folder: Path, name: String, extension : String, code: String) {
         val filename = folder / (name + extension)
@@ -33,15 +34,81 @@ object CppGen {
     fun writeMonitorHeader(contract: Contract, folder: Path) {
         val signature = contract.signature
         val name = contract.name
-        val structName = name+"_state"
+        val monitorName = name+"Monitor"
+        val modeName = name+"Mode"
+        val stateName = name+"State"
+        val clockTraceName = name+"ClockTrace"
+
         val code = """
             #pragma once
 
             #define TRUE true
             #define FALSE false
             #include <iostream>
+            #include <map>
+            #include <vector>
+            #include <deque>
+            #include <string>
             
-            struct $structName {
+            class ClockVal {
+                int _e{};
+                int _s{};
+                public:
+                constexpr ClockVal() noexcept = default;
+                constexpr ClockVal(int env, int sys) noexcept : _e{env}, _s{sys} {};
+                
+                constexpr int env() const { return _e; }
+                constexpr int sys() const { return _s; }
+                constexpr int total() const { return _e + _s; }
+                
+                void reset() {
+                    _e = _s = 0;
+                }
+                void advance(int t_e, int t_s) {
+                    _e += t_e;
+                    _s += t_s;
+                }
+            };
+            std::ostream& operator<<(std::ostream& out, ClockVal const& v);
+            
+            struct InvalidTimeAccess{};
+            
+            enum class $modeName {
+                ${contract.states.joinToString(", ")}
+            };
+            std::ostream& operator<<(std::ostream& out, $modeName v);
+            
+            using std::map;
+            using std::vector;
+            using std::deque; 
+            using std::string;
+            using $clockTraceName = map<string, deque<ClockVal>>;
+    
+            template<typename T>
+            std::ostream& operator<<(std::ostream& out, vector<T> const& v) {
+                out << "[";
+                for(auto it = v.cbegin(); it != v.cend(); ++it) {
+                    if(it != v.cbegin()) out << ",";
+                    out << *it;
+                }
+                return out << "]";
+            }
+            template<typename T>
+            std::ostream& operator<<(std::ostream& out, deque<T> const& v) {
+                out << "[";
+                for(auto it = v.cbegin(); it != v.cend(); ++it) {
+                    if(it != v.cbegin()) out << ",";
+                    out << *it;
+                }
+                return out << "]";
+            }
+            
+            struct $stateName{
+                $modeName mode;
+                $clockTraceName clock_traces;
+            };
+            
+            struct $monitorName {
                 //inputs
                 ${signature.inputs.declareMembers()}
                 //outputs
@@ -49,27 +116,69 @@ object CppGen {
                 //internals
                 ${signature.internals.declareMembers()}
                 //states
-                bool ${contract.states.joinToString(", ") {"$it = true"}};
+                vector<$stateName> states;
                 //history${
-            contract.history.joinToString("") { (n, d) ->
-                val type = contract.signature.get(n)?.type?.toC()
-                (0..d).joinToString("") {
-                    """
-                $type h_${n}_${it}{};
-                """
+                    contract.history.filter { contract.signature.clocks.none { v -> v.name == it.first } }.joinToString("") { (name, depth) ->
+                        val type = contract.signature.get(name)?.type?.toC()
+                        (0..depth).joinToString("") {"""
+                $type h_${name}_${it}{};"""
+                        }
+                    }
                 }
-            }
-        }
+                
+                bool postcondition_accessed_incorrect_time = false;
+                bool precondition_accessed_incorrect_time = false;
                 
                 bool SYSTEM_LOSES = false;
                 bool ENVIRONMENT_LOSES = false;
             
-                [[nodiscard]] constexpr $structName() noexcept {
-                    ${contract.states.joinToString("") { """
-                    $it = ${!it.startsWith("init")};"""}}
+                [[nodiscard]] $monitorName() noexcept {
+                    $clockTraceName initial_clock_val;
+                    ${contract.signature.clocks
+                    .filter { !it.name.isSuffixedClock() }
+                    .toList().joinToString("") { """
+                    initial_clock_val["${it.name}"] = deque<ClockVal>{ClockVal{}};"""}
+                    }
+                    states = vector<$stateName>{${contract.states.filter { it[0].isLowerCase() }.joinToString(", ") { 
+                        "$stateName{$modeName::$it, initial_clock_val}"
+                    }}};
+                    
                 }
                 void update();
-                friend std::ostream& operator<<(std::ostream& out, $structName const&);
+                void advance(int t_e, int t_s);
+                friend std::ostream& operator<<(std::ostream& out, $monitorName const&);
+            };
+            
+            enum class ClockKind { env, sys, total };
+            
+            template<ClockKind clock_kind>
+            class ClockHistoryEntry {
+            	$clockTraceName* clock_traces;
+            	std::string clock_name;
+            	int depth;
+            	
+            	public:
+            	[[nodiscard]] ClockHistoryEntry($clockTraceName& clock_traces, std::string clock_name, int depth) noexcept : 
+                    clock_traces{&clock_traces}, clock_name{std::move(clock_name)}, depth{depth} {}
+            	
+            	[[nodiscard]] operator int() const {
+            	auto const clock_history = (*clock_traces)[clock_name];
+            	if(depth < clock_history.size()) {
+            		auto const& clock = clock_history[clock_history.size() - depth - 1];
+                    switch(clock_kind) {
+                        case ClockKind::env: return clock.env();
+                        case ClockKind::sys: return clock.sys();
+                        case ClockKind::total: return clock.total();
+                    }
+            	}else{
+                    #ifdef CLOCK_USE_DEFAULT
+            		return 0;
+                    #else
+                    throw InvalidTimeAccess{};
+                    #endif
+            	}
+            }
+            
             };
         """.trimIndent()
         writeCode(folder, contract.name, headerExtension, code)
@@ -77,67 +186,117 @@ object CppGen {
 
     fun writeMonitorTu(contract: Contract, folder: Path) {
         val name = contract.name
-        val structName = name+"_state"
+        val monitorName = name+"Monitor"
+        val stateName = name+"State"
+        val modeName = name+"Mode"
         val stateVars = contract.signature.inputs + contract.signature.outputs
 
         val code = """
             #include "$name$headerExtension"
             
-            void $structName::update() {
-                bool any_pre = false;
+            std::ostream& operator<<(std::ostream& out, ClockVal const& v) {
+                return out << "(" << v.env() << "," << v.sys() << ")";
+            }
             
+            std::ostream& operator<<(std::ostream& out, $modeName v) {
+                switch(v) {
+                    ${contract.states.joinToString("") { """
+                    case $modeName::$it:
+                        return out << "$it"; """ }}
+                }
+            }
+            
+            void $monitorName::advance(int t_e, int t_s) {
+                std::cout << "Advance monitor by t_e = "<<t_e<<", t_s = "<<t_s<<std::endl;
+                for(auto& state : states) {
+                    for(auto& [clock, clockvals] : state.clock_traces) {
+                        clockvals.back().advance(t_e, t_s);
+                    }
+                }
+            }
+            
+            void $monitorName::update() {
+                postcondition_accessed_incorrect_time = false;
+                precondition_accessed_incorrect_time = false;
+                
                 //update history                                    
-                ${contract.history.joinToString("\n") { (n, d) ->
-            val t = contract.signature.get(n)?.type?.toC()
-            (d downTo 1).joinToString("") { """
+                ${contract.history.filter { contract.signature.clocks.none { v -> v.name == it.first } }.joinToString("\n") { (n, d) ->
+                val t = contract.signature.get(n)?.type?.toC()
+                (d downTo 1).joinToString("") { """
                 h_${n}_$it = h_${n}_${it - 1};""" } +"""
                 h_${n}_0 = $n;
                 """
-        }}
+                }}
                 
-                //eval pre and post conditions
-                ${contract.transitions.joinToString("\n") {"""
-                bool const pre_${it.name} = ${it.contract.pre.inState(stateVars, "")};
-                bool const post_${it.name} = ${it.contract.post.inState(stateVars, "")};
-                """
-        }
-        }
                 //update states
-                ${contract.transitions.incomingList().joinToString("") { 
-                    val (nextState, incomingTransitions) = it;
-                    """
-                    bool const next_$nextState = """ + incomingTransitions.joinToString(" | ") {
-                        "${it.from} & pre_${it.name} & post_${it.name}"
-                    } + ";"
-                }}
+                vector<$stateName> next_states;
+                bool any_pre = false;
+                for(auto& state : states) {
+                    ${contract.signature.clocks
+                    .filter { !it.name.isSuffixedClock() }
+                    .joinToString("") {"""
+                    auto ${it.name} = state.clock_traces["${it.name}"].back().total();
+                    auto ${it.name}_e = state.clock_traces["${it.name}"].back().env();
+                    auto ${it.name}_s = state.clock_traces["${it.name}"].back().sys();
+                    """}}
+                    ${contract.signature.clocks.filter { x -> !x.name.isSuffixedClock() && contract.history.none { it.first == x.name } }.joinToString("") { """
+                    if(state.clock_traces["${it.name}"].size() > 1)state.clock_traces["${it.name}"].pop_front();""" }}
+                    ${contract.history.filter { !it.first.isSuffixedClock() && contract.signature.clocks.any { v -> v.name == it.first } }.joinToString("") { (name, depth) -> """
+                    if(state.clock_traces["$name"].size() > $depth + 1)state.clock_traces["$name"].pop_front();""" +
+                    (1..depth).joinToString("") {"""
+                    auto h_${name}_${it} = ClockHistoryEntry<ClockKind::total>(state.clock_traces, "$name", $it);
+                    auto h_${envClockName(name)}_${it} = ClockHistoryEntry<ClockKind::env>(state.clock_traces, "$name", $it);
+                    auto h_${sysClockName(name)}_${it} = ClockHistoryEntry<ClockKind::sys>(state.clock_traces, "$name", $it);"""
+                    }}}
+                    switch(state.mode) {
+                        ${contract.transitions.groupBy { it.from }.toList().joinToString("""
+                        """) { "case $modeName::${it.first}: {" +
+                        it.second.joinToString("") {
+                            """
+                            try{
+                            if(${it.contract.pre.toCExpr()}) {
+                                any_pre = true;
+                                try{
+                                if(${it.contract.post.toCExpr()}) {
+                                    auto new_clock_traces = state.clock_traces;
+                                    for(auto& [clock, clockvals] : new_clock_traces) {
+                                        auto next_clock = clockvals.back();
+                                        clockvals.push_back(std::move(next_clock));
+                                    }
+                                    ${if(it.clocks.isEmpty()){""}else{"""
+                                    for(auto clock : {${it.clocks.joinToString(",") {"\"$it\""}}}) {
+                                        new_clock_traces[clock].back().reset();
+                                    }"""}}
+                                    next_states.emplace_back($stateName{$modeName::${it.to}, std::move(new_clock_traces)});
+                                }
+                                } catch(InvalidTimeAccess const& time_err) {
+                                    postcondition_accessed_incorrect_time = true;
+                                }
+                            }
+                            } catch(InvalidTimeAccess const& time_err) {
+                                precondition_accessed_incorrect_time = true;
+                            }"""
+                        } + """
+                            break;
+                        };
+                        """ }}
+                    }
                 
-                ${contract.transitions.incomingList().joinToString("") {
-                    val (nextState, incomingTransitions) = it;
-                    """
-                        any_pre |= """ + incomingTransitions.joinToString(" | ") {
-                        "${it.from} & pre_${it.name}"
-                    } + ";"
-                }}
+                }
+                states = std::move(next_states);
                 
-                    ${
-            contract.states.joinToString("") {"""
-                    $it = next_$it;"""
-            }
-        }
-                bool const any_contracts = ${contract.states.joinToString(" | ") {it}};
-                
-                if(!ENVIRONMENT_LOSES && !SYSTEM_LOSES){
-                    if(!any_pre){
+                if(!ENVIRONMENT_LOSES && !SYSTEM_LOSES) {
+                    if(!any_pre) {
                         ENVIRONMENT_LOSES = true;
-                    }else if(!any_contracts){
+                    }else if(states.empty()) {
                         SYSTEM_LOSES = true;
                     }
                 }
             }
             
-            std::ostream& operator<<(std::ostream& out, $structName const& state) {
+            std::ostream& operator<<(std::ostream& out, $monitorName const& monitor) {
                 //inputs
-                out << ${"\"$structName\\n\""};
+                out << ${"\"$monitorName\\n\""};
                 ${contract.signature.inputs.printVars()}
                 ${if(contract.signature.inputs.isNotEmpty()){"""out << '\n';"""}else{""}}
                 //outputs
@@ -147,16 +306,30 @@ object CppGen {
                 ${contract.signature.internals.printVars()}
                 ${if(contract.signature.internals.isNotEmpty()){"""out << '\n';"""}else{""}}
                 //states
-                ${contract.states.joinToString("\n                ") {"if(state.$it)out << \"         State: $it\\n\";"}}
-                if(state.SYSTEM_LOSES)out << "         (SYSTEM LOSES)\n";
-                if(state.ENVIRONMENT_LOSES)out << "         (ENVIRONMENT LOSES)\n";
+                for(auto const& state : monitor.states) {
+                    out << "      " << state.mode << "\n";
+                    for(auto const& [clock, clockvals] : state.clock_traces) {
+                        out << "        " << clock << "\n           " << clockvals << "\n"; 
+                    }
+                }
+                if(monitor.precondition_accessed_incorrect_time)out << "         (precondition accessed incorrect clock history)\n";
+                if(monitor.postcondition_accessed_incorrect_time)out << "         (postcondition accessed incorrect clock history)\n";
+                if(monitor.SYSTEM_LOSES)out << "         (SYSTEM LOSES)\n";
+                if(monitor.ENVIRONMENT_LOSES)out << "         (ENVIRONMENT LOSES)\n";
                 return out;
             }
+            
     """.trimIndent()
         writeCode(folder, contract.name, sourceExtension, code)
     }
 
     fun writeMainTu(contract: Contract, variableMap: MutableList<Pair<String, IOPort>>, folder: Path) {
+
+        val name = contract.name
+        val monitorName = name+"Monitor"
+        val stateName = name+"State"
+        val modeName = name+"Mode"
+        val stateVars = contract.signature.inputs + contract.signature.outputs
         val code = """ 
                 #include <cstdlib>
                 #include <cstdio>
@@ -235,7 +408,7 @@ object CppGen {
                     }
                     auto filename = argv[1];
                     
-                    ${contract.name}_state state;
+                    $monitorName monitor;
                     
                     int iteration = 0;
                     while (true) {
@@ -246,8 +419,9 @@ object CppGen {
                         }
                         std::cout << std::endl;
                         
-                        auto te = std::stoi(kvs["te"]);
-                        auto ts = std::stoi(kvs["ts"]);
+                        auto te = std::stoi(kvs["${envClockName(tClockName)}"]);
+                        auto ts = std::stoi(kvs["${sysClockName(tClockName)}"]);
+                        monitor.advance(te, ts);
                         
                         //inputs
                         ${contract.signature.inputs.readVars()}
@@ -257,8 +431,8 @@ object CppGen {
                         ${contract.signature.internals.readVars()}
                         
                         //process
-                        state.update();
-                        std::cout << state << '\n' << std::endl;
+                        monitor.update();
+                        std::cout << monitor << '\n' << std::endl;
                     }
                     
                 }
@@ -290,8 +464,9 @@ object CppGen {
             	}
             };
             
-            void ${name}_state::update_system() {
-                ${ system.code ?: system.toporder }
+            void ${name}_state::update_system() {${ 
+                ("\n" + (system.code ?: system.toporder)).trimIndent().replace("\n", "\n                ") 
+            }
             }
 
             void write_kvs(${name}_state const& state, char const* filename) {
@@ -303,6 +478,7 @@ object CppGen {
                 
                 ${signature.inputs.writeVars()}
                 ${signature.outputs.writeVars()}
+                ${signature.clocks.writeVars()}
                 ${signature.plainInternals.writeVars()}
                 ${signature.instances.writeVars()}
                 file << std::endl;
@@ -325,18 +501,16 @@ object CppGen {
                     auto const time_before_system_update = std::chrono::steady_clock::now();
                     auto const te_millis = std::chrono::duration_cast<std::chrono::milliseconds>(time_before_system_update - time_before_env);
                     
-                    state.te = te_millis.count();
+                    state.${envClockName(tClockName)} = te_millis.count();
                     state.update_system();
                     
                     auto const time_after_system_update = std::chrono::steady_clock::now();
                     time_before_env = time_after_system_update;
                     
                     auto const ts_millis = std::chrono::duration_cast<std::chrono::milliseconds>(time_after_system_update - time_before_system_update);
-                    state.ts = ts_millis.count();
+                    state.${sysClockName(tClockName)} = ts_millis.count();
 
-                    std::cout << "t=" << state.tick << ", v=" << state.val << ", d=" << state.down << std::endl;
                     write_kvs(state, filename);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
                 }
             }
         """.trimIndent()
@@ -356,6 +530,7 @@ object CppGen {
 
             class ${system.name}_state {
                 public:
+              ${system.signature.clocks.declareMembers()}
               // Inputs
               ${system.signature.inputs.declareMembers()}
               // Outputs
@@ -371,14 +546,22 @@ object CppGen {
         writeCode(folder, system.name, headerExtension, code)
     }
 
-    private fun Iterable<Variable>.declareMembers() = joinToString("\n                ") { "${it.type.name} ${it.name}{};" }
+    private fun Iterable<Variable>.declareMembers(nameSuffix : String = "") = joinToString("\n                ") { "${it.type.name} ${it.name+nameSuffix}{};" }
 
-    private fun Iterable<Variable>.readVars() = joinToString("\n                        ") { "state.${it.name} = std::stoi(kvs[\"${it.name}\"]);" }
+    private fun Iterable<Variable>.readVars(monitorName : String = "monitor", nameSuffix : String = "") = joinToString("\n                        ") { "$monitorName.${it.name+nameSuffix} = std::stoi(kvs[\"${it.name+nameSuffix}\"]);" }
 
-    private fun Iterable<Variable>.printVars() = joinToString("\n                ") { "out << \" ${it.name} = \" << state.${it.name} << ',';" }
+    private fun Iterable<Variable>.printVars(monitorName : String = "monitor", nameSuffix : String = "") = joinToString("\n                ") { "out << \" ${it.name+nameSuffix} = \" << $monitorName.${it.name+nameSuffix} << ',';" }
 
-    private fun Iterable<Variable>.writeVars() = joinToString("\n                    ") { "file << \"${it.name}=\" << state.${it.name} << ',';" }
+    private fun Iterable<Variable>.writeVars(nameSuffix : String = "") = joinToString("\n                    ") { "file << \"${it.name+nameSuffix}=\" << state.${it.name+nameSuffix} << ',';" }
 
 }
 
 private fun List<CATransition>.incomingList(): List<Pair<String, List<CATransition>>> = this.groupBy { it.to }.toList()
+
+const val tClockName = "t"
+const val envClockNameSuffix = "_e"
+const val sysClockNameSuffix = "_s"
+fun envClockName(clockName : String) = clockName + envClockNameSuffix
+fun sysClockName(clockName : String) = clockName + sysClockNameSuffix
+
+fun String.isSuffixedClock():Boolean = this.endsWith(envClockNameSuffix) || this.endsWith(sysClockNameSuffix)
