@@ -50,16 +50,34 @@ object CppGen {
             #include <deque>
             #include <string>
             
+            #ifdef FUZZY
+            #include "q_value.hpp"
+            #else
+            template<typename T, int... Ids>
+            using ClockVar = T;
+            
+            using Q_Value = bool;
+            #endif
+            
+            enum class ClockId{
+                ${contract.signature.clocks
+                .filter { !it.name.isSuffixedClock() }
+                .joinToString(",") {it.name}}
+            };
+            
+            template<int clock_id>
             class ClockVal {
                 int _e{};
                 int _s{};
                 public:
-                constexpr ClockVal() noexcept = default;
-                constexpr ClockVal(int env, int sys) noexcept : _e{env}, _s{sys} {};
+                using value_type = ClockVar<int, clock_id>;
                 
-                constexpr int env() const { return _e; }
-                constexpr int sys() const { return _s; }
-                constexpr int total() const { return _e + _s; }
+                ClockVal() noexcept = default;
+                ClockVal(int env, int sys) noexcept : _e{env}, _s{sys} {};
+                
+                value_type env() const { return _e; }
+                value_type sys() const { return _s; }
+                value_type total() const { return _e + _s; }
                 
                 void reset() {
                     _e = _s = 0;
@@ -69,7 +87,10 @@ object CppGen {
                     _s += t_s;
                 }
             };
-            std::ostream& operator<<(std::ostream& out, ClockVal const& v);
+            template<int clock_id>
+            std::ostream& operator<<(std::ostream& out, ClockVal<clock_id> const& v){
+                return out << "(" << v.env() << "," << v.sys() << ")";
+            }
             
             struct InvalidTimeAccess{};
             
@@ -82,7 +103,13 @@ object CppGen {
             using std::vector;
             using std::deque; 
             using std::string;
-            using $clockTraceName = map<string, deque<ClockVal>>;
+            struct $clockTraceName{
+                 ${contract.signature.clocks
+                .filter { !it.name.isSuffixedClock() }
+                .joinToString("") {"""
+                    deque<ClockVal<(int)ClockId::${it.name}>> ${it.name}_trace;"""}
+                }
+            };
     
             template<typename T>
             std::ostream& operator<<(std::ostream& out, vector<T> const& v) {
@@ -103,9 +130,13 @@ object CppGen {
                 return out << "]";
             }
             
-            struct $stateName{
+            struct $stateName {
                 $modeName mode;
                 $clockTraceName clock_traces;
+                #ifdef FUZZY
+                Q_Value q_assume;
+                Q_Value q_guarantee;
+                #endif
             };
             
             struct $monitorName {
@@ -137,7 +168,7 @@ object CppGen {
                     ${contract.signature.clocks
                     .filter { !it.name.isSuffixedClock() }
                     .toList().joinToString("") { """
-                    initial_clock_val["${it.name}"] = deque<ClockVal>{ClockVal{}};"""}
+                    initial_clock_val.${it.name}_trace = deque<ClockVal<(int)ClockId::${it.name}>>{ClockVal<(int)ClockId::${it.name}>{}};"""}
                     }
                     states = vector<$stateName>{${contract.states.filter { it[0].isLowerCase() }.joinToString(", ") { 
                         "$stateName{$modeName::$it, initial_clock_val}"
@@ -151,33 +182,32 @@ object CppGen {
             
             enum class ClockKind { env, sys, total };
             
-            template<ClockKind clock_kind>
+            template<ClockKind clock_kind, int clock_id>
             class ClockHistoryEntry {
-            	$clockTraceName* clock_traces;
-            	std::string clock_name;
+                using trace_type = deque<ClockVal<clock_id>>; 
+            	trace_type* trace;
             	int depth;
             	
             	public:
-            	[[nodiscard]] ClockHistoryEntry($clockTraceName& clock_traces, std::string clock_name, int depth) noexcept : 
-                    clock_traces{&clock_traces}, clock_name{std::move(clock_name)}, depth{depth} {}
+            	[[nodiscard]] ClockHistoryEntry(trace_type& trace, int depth) noexcept : 
+                    trace{&trace}, depth{depth} {}
             	
             	[[nodiscard]] operator int() const {
-            	auto const clock_history = (*clock_traces)[clock_name];
-            	if(depth < clock_history.size()) {
-            		auto const& clock = clock_history[clock_history.size() - depth - 1];
-                    switch(clock_kind) {
-                        case ClockKind::env: return clock.env();
-                        case ClockKind::sys: return clock.sys();
-                        case ClockKind::total: return clock.total();
+                    if(depth < trace.size()) {
+                        auto const& clock = (*trace)[trace->size() - depth - 1];
+                        switch(clock_kind) {
+                            case ClockKind::env: return clock.env();
+                            case ClockKind::sys: return clock.sys();
+                            case ClockKind::total: return clock.total();
+                        }
+                    }else{
+                        #ifdef CLOCK_USE_DEFAULT
+                        return 0;
+                        #else
+                        throw InvalidTimeAccess{};
+                        #endif
                     }
-            	}else{
-                    #ifdef CLOCK_USE_DEFAULT
-            		return 0;
-                    #else
-                    throw InvalidTimeAccess{};
-                    #endif
-            	}
-            }
+                }
             
             };
         """.trimIndent()
@@ -194,10 +224,6 @@ object CppGen {
         val code = """
             #include "$name$headerExtension"
             
-            std::ostream& operator<<(std::ostream& out, ClockVal const& v) {
-                return out << "(" << v.env() << "," << v.sys() << ")";
-            }
-            
             std::ostream& operator<<(std::ostream& out, $modeName v) {
                 switch(v) {
                     ${contract.states.joinToString("") { """
@@ -209,9 +235,11 @@ object CppGen {
             void $monitorName::advance(int t_e, int t_s) {
                 std::cout << "Advance monitor by t_e = "<<t_e<<", t_s = "<<t_s<<std::endl;
                 for(auto& state : states) {
-                    for(auto& [clock, clockvals] : state.clock_traces) {
-                        clockvals.back().advance(t_e, t_s);
-                    }
+                    ${contract.signature.clocks
+                    .filter { !it.name.isSuffixedClock() }
+                    .joinToString("") {"""
+                    state.clock_traces.${it.name}_trace.back().advance(t_e, t_s);
+                    """}}
                 }
             }
             
@@ -235,14 +263,14 @@ object CppGen {
                     ${contract.signature.clocks
                     .filter { !it.name.isSuffixedClock() }
                     .joinToString("") {"""
-                    auto ${it.name} = state.clock_traces["${it.name}"].back().total();
-                    auto ${it.name}_e = state.clock_traces["${it.name}"].back().env();
-                    auto ${it.name}_s = state.clock_traces["${it.name}"].back().sys();
+                    auto ${it.name} = state.clock_traces.${it.name}_trace.back().total();
+                    auto ${it.name}_e = state.clock_traces.${it.name}_trace.back().env();
+                    auto ${it.name}_s = state.clock_traces.${it.name}_trace.back().sys();
                     """}}
                     ${contract.signature.clocks.filter { x -> !x.name.isSuffixedClock() && contract.history.none { it.first == x.name } }.joinToString("") { """
-                    if(state.clock_traces["${it.name}"].size() > 1)state.clock_traces["${it.name}"].pop_front();""" }}
+                    if(state.clock_traces.${it.name}_trace.size() > 1)state.clock_traces.${it.name}_trace.pop_front();""" }}
                     ${contract.history.filter { !it.first.isSuffixedClock() && contract.signature.clocks.any { v -> v.name == it.first } }.joinToString("") { (name, depth) -> """
-                    if(state.clock_traces["$name"].size() > $depth + 1)state.clock_traces["$name"].pop_front();""" +
+                    if(state.clock_traces.${name}_trace.size() > $depth + 1)state.clock_traces.${name}_trace.pop_front();""" +
                     (1..depth).joinToString("") {"""
                     auto h_${name}_${it} = ClockHistoryEntry<ClockKind::total>(state.clock_traces, "$name", $it);
                     auto h_${envClockName(name)}_${it} = ClockHistoryEntry<ClockKind::env>(state.clock_traces, "$name", $it);
@@ -254,20 +282,37 @@ object CppGen {
                         it.second.joinToString("") {
                             """
                             try{
-                            if(${it.contract.pre.toCExpr()}) {
+                            Q_Value pre_cond = ${it.contract.pre.toCExpr()};
+                            #ifdef FUZZY
+                            pre_cond = state.q_assume && pre_cond;
+                            #endif
+                            if(pre_cond) {
                                 any_pre = true;
                                 try{
-                                if(${it.contract.post.toCExpr()}) {
+                                Q_Value post_cond = ${it.contract.post.toCExpr()};
+                                #ifdef FUZZY
+                                post_cond = state.q_guarantee && post_cond;
+                                #endif
+                                if(post_cond) {
                                     auto new_clock_traces = state.clock_traces;
-                                    for(auto& [clock, clockvals] : new_clock_traces) {
-                                        auto next_clock = clockvals.back();
-                                        clockvals.push_back(std::move(next_clock));
+                                    ${contract.signature.clocks
+                                    .filter { !it.name.isSuffixedClock() }
+                                    .joinToString("") {"""
+                                    {
+                                    auto clockvals = &new_clock_traces.${it.name}_trace;
+                                    auto next_clock = clockvals->back();
+                                    clockvals->push_back(std::move(next_clock));
                                     }
-                                    ${if(it.clocks.isEmpty()){""}else{"""
-                                    for(auto clock : {${it.clocks.joinToString(",") {"\"$it\""}}}) {
-                                        new_clock_traces[clock].back().reset();
-                                    }"""}}
+                                    """}}
+                                    ${it.clocks.joinToString(""){"""
+                                    new_clock_traces.${it}_trace.back().reset();
+                                    """        
+                                    }}
+                                    #ifdef FUZZY
+                                    next_states.emplace_back($stateName{$modeName::${it.to}, std::move(new_clock_traces), pre_cond, post_cond});
+                                    #else
                                     next_states.emplace_back($stateName{$modeName::${it.to}, std::move(new_clock_traces)});
+                                    #endif
                                 }
                                 } catch(InvalidTimeAccess const& time_err) {
                                     postcondition_accessed_incorrect_time = true;
@@ -307,10 +352,18 @@ object CppGen {
                 ${if(contract.signature.internals.isNotEmpty()){"""out << '\n';"""}else{""}}
                 //states
                 for(auto const& state : monitor.states) {
+                    #ifdef FUZZY
+                    out << "      " << state.mode << "    ("<<state.q_assume<<","<<state.q_guarantee<<")\n";
+                    #else
                     out << "      " << state.mode << "\n";
-                    for(auto const& [clock, clockvals] : state.clock_traces) {
-                        out << "        " << clock << "\n           " << clockvals << "\n"; 
-                    }
+                    #endif
+                    
+                    ${contract.signature.clocks
+                    .filter { !it.name.isSuffixedClock() }
+                    .joinToString("") {"""
+                    out << "        ${it.name}\n           " << state.clock_traces.${it.name}_trace << "\n"; 
+                    """
+                    }}
                 }
                 if(monitor.precondition_accessed_incorrect_time)out << "         (precondition accessed incorrect clock history)\n";
                 if(monitor.postcondition_accessed_incorrect_time)out << "         (postcondition accessed incorrect clock history)\n";
@@ -538,7 +591,7 @@ object CppGen {
               // Internals
               ${system.signature.internals.declareMembers()}
               
-              constexpr ${system.name}_state() noexcept = default;
+              ${system.name}_state() noexcept = default;
               void update_system();
             };
      
