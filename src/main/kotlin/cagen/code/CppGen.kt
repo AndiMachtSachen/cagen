@@ -28,6 +28,7 @@ object CppGen {
     fun writeRuntimeMonitor(contract: UseContract, folder: Path) {
         writeMonitorHeader(contract.contract, folder)
         writeFuzzyHeader(folder)
+        writeFuzzyDefaultImpl(folder)
         writeMonitorTu(contract.contract, folder)
         writeMainTu(contract.contract, contract.variableMap, folder)
     }
@@ -51,6 +52,12 @@ object CppGen {
             #include <deque>
             #include <string>
             
+            enum class ClockId{
+                ${contract.signature.clocks
+                .filter { !it.name.isSuffixedClock() }
+                .joinToString(",") {it.name}}
+            };
+            
             #ifdef FUZZY
             #include "q_value$headerExtension"
             #else
@@ -59,12 +66,6 @@ object CppGen {
             
             using Q_Value = bool;
             #endif
-            
-            enum class ClockId{
-                ${contract.signature.clocks
-                .filter { !it.name.isSuffixedClock() }
-                .joinToString(",") {it.name}}
-            };
             
             template<int clock_id>
             class ClockVal {
@@ -498,12 +499,17 @@ object CppGen {
         writeCode(folder, "q_value", headerExtension, qValueCode)
     }
 
+    fun writeFuzzyDefaultImpl(folder: Path) {
+        writeCode(folder, "fuzzy_impl", headerExtension, fuzzyImplCode)
+    }
+
     fun writeSystemTu(system: System, folder: Path) {
         val signature = system.signature
         val name = system.name
 
         val code = """
             #include "$name$headerExtension"
+            #include "${name}Environment$headerExtension"
             #include <iostream>
             #include <fstream>
             #include <string>
@@ -512,16 +518,6 @@ object CppGen {
 
             #define EXIT(code) {std::cerr << "EXIT line " << __LINE__ << " with code " << code << std::endl;fflush(0);exit(code);}
 
-            class Random {
-                public:
-            	operator int() const {
-            		return std::rand();
-            	}
-            	operator bool() const {
-            		return std::rand() % 2;
-            	}
-            };
-            
             void ${name}_state::update_system() {${ 
                 ("\n" + (system.code ?: system.toporder)).trimIndent().replace("\n", "\n                ") 
             }
@@ -553,8 +549,8 @@ object CppGen {
                 
                 auto time_before_env = std::chrono::steady_clock::now();
                 while(true) {
-                    // provide random inputs
-                    ${signature.inputs.joinToString("\n                    ") { "state.${it.name} = Random{};" }}
+                    // provided inputs
+                    ${signature.inputs.joinToString("\n                    ") { "state.${it.name} = get_input_${it.name}();" }}
                     
                     auto const time_before_system_update = std::chrono::steady_clock::now();
                     auto const te_millis = std::chrono::duration_cast<std::chrono::milliseconds>(time_before_system_update - time_before_env);
@@ -604,6 +600,31 @@ object CppGen {
         writeCode(folder, system.name, headerExtension, code)
     }
 
+    fun writeEnvironmentHeader(system: System, folder: Path) {
+        val signature = system.signature
+        val name = system.name
+
+        val code = """
+            #include <cstdlib>
+            class Random {
+                public:
+            	operator int() const {
+            		return std::rand();
+            	}
+            	operator bool() const {
+            		return std::rand() % 2;
+            	}
+            };
+            
+            // input functions
+            ${signature.inputs.joinToString("") { """
+            auto get_input_${it.name}(){
+                return Random{};
+            }""" }}
+        """.trimIndent()
+        writeCode(folder, system.name+"Environment", headerExtension, code)
+    }
+
     private fun Iterable<Variable>.declareMembers(nameSuffix : String = "") = joinToString("\n                ") { "${it.type.name} ${it.name+nameSuffix}{};" }
 
     private fun Iterable<Variable>.readVars(monitorName : String = "monitor", nameSuffix : String = "") = joinToString("\n                        ") { "$monitorName.${it.name+nameSuffix} = std::stoi(kvs[\"${it.name+nameSuffix}\"]);" }
@@ -614,41 +635,42 @@ object CppGen {
 
 }
 
+private const val fuzzyImplCode = """
+#include <algorithm>
+inline Q_Value negate(Q_Value const& q){
+    //standard negation
+    return Q_Value(1 - q.v);
+}
+inline Q_Value t_norm(Q_Value const& q1, Q_Value const& q2){
+    //min norm
+    return Q_Value(std::min(q1.v, q2.v));
+}
+inline Q_Value s_norm(Q_Value const& q1, Q_Value const& q2){
+    //max norm
+    return Q_Value(std::max(q1.v, q2.v));
+}
+
+template<int id, typename T1, typename T2>
+auto eq_substitution(T1 v1, T2 v2) {
+    //normal non-fuzzy behaviour
+	return Q_Value(v1 == v2);
+}
+template<int id, typename T1, typename T2>
+auto lt_substitution(T1 v1, T2 v2) {
+	//normal non-fuzzy behaviour
+	return Q_Value(v1 < v2);
+}
+"""
 private const val qValueCode = """
 #include <iostream>
 #include <type_traits>
 
 class Q_Value {
-	double v;
-	
 	public:
+    double v;
+	
 	constexpr Q_Value() noexcept : v{1} {}
 	constexpr Q_Value(double v) noexcept : v(v) {}
-	Q_Value operator&&(Q_Value const& other) const {
-		return Q_Value(v * other.v);
-	}
-	Q_Value operator||(Q_Value const& other) const {
-		return Q_Value(std::max(v, other.v));
-	}
-	Q_Value operator&&(bool other) const {
-		return *this && Q_Value(other);
-	}
-	Q_Value operator||(bool other) const {
-		return *this || Q_Value(other);
-	}
-	
-	Q_Value operator&(Q_Value const& other) const {
-		return *this && other;
-	}
-	Q_Value operator|(Q_Value const& other) const {
-		return *this || other;
-	}
-	Q_Value operator&(bool other) const {
-		return *this && Q_Value(other);
-	}
-	Q_Value operator|(bool other) const {
-		return *this || Q_Value(other);
-	}
 	
 	explicit operator bool() const {
 		return v > 0;
@@ -658,29 +680,44 @@ class Q_Value {
         return os << "Q("<<q.v<<")";
     }
 };
+#include "fuzzy_impl${CppGen.headerExtension}"
+
 inline Q_Value operator&&(bool lhs, Q_Value const& rhs) {
-	return Q_Value(lhs) && rhs;
+	return t_norm(lhs, rhs);
 }
 inline Q_Value operator||(bool lhs, Q_Value const& rhs) {
-	return Q_Value(lhs) || rhs;
+	return s_norm(lhs, rhs);
 }
 inline Q_Value operator&(bool lhs, Q_Value const& rhs) {
-	return Q_Value(lhs) && rhs;
+	return t_norm(lhs, rhs);
 }
 inline Q_Value operator|(bool lhs, Q_Value const& rhs) {
-	return Q_Value(lhs) || rhs;
+	return s_norm(lhs, rhs);
 }
-
-
-template<int id, typename T1, typename T2>
-auto eq_substitution(T1 v1, T2 v2) {
-	return Q_Value(v1 == v2);
+inline Q_Value operator&&(Q_Value const& lhs, Q_Value const& rhs) {
+	return t_norm(lhs, rhs);
 }
-template<int id, typename T1, typename T2>
-auto lt_substitution(T1 v1, T2 v2) {
-	return Q_Value(v1 < v2);
+inline Q_Value operator||(Q_Value const& lhs, Q_Value const& rhs) {
+	return s_norm(lhs, rhs);
 }
-
+inline Q_Value operator&(Q_Value const& lhs, Q_Value const& rhs) {
+	return t_norm(lhs, rhs);
+}
+inline Q_Value operator|(Q_Value const& lhs, Q_Value const& rhs) {
+	return s_norm(lhs, rhs);
+}
+inline Q_Value operator&&(Q_Value const& lhs, bool rhs) {
+	return t_norm(lhs, rhs);
+}
+inline Q_Value operator||(Q_Value const& lhs, bool rhs) {
+	return s_norm(lhs, rhs);
+}
+inline Q_Value operator&(Q_Value const& lhs, bool rhs) {
+	return t_norm(lhs, rhs);
+}
+inline Q_Value operator|(Q_Value const& lhs, bool rhs) {
+	return s_norm(lhs, rhs);
+}
 
 template<int Id, int... Ids>
 struct Contains;

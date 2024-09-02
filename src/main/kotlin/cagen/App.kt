@@ -269,6 +269,7 @@ class Rca : CliktCommand() {
             }
             CppGen.writeSystemTu(sys, outputFolder.toPath())
             CppGen.writeSystemHeader(sys, outputFolder.toPath())
+            CppGen.writeEnvironmentHeader(sys, outputFolder.toPath())
         }
     }
 }
