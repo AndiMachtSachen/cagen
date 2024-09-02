@@ -1,0 +1,37 @@
+
+contract SimpleEcs {
+    output wl : int
+    output tl : int
+    output out : bool
+	
+	clock timer : int
+	
+	history wl(1)
+	history out(1)
+	
+	enableChw -> Chw :: true ==> true #timer
+	
+	Chw -> Chw :: wl <= tl & t < timer ==> ! h_out_1 #timer
+	Chw -> Chw :: wl <= tl & t = timer ==> h_out_1 #timer
+	Chw -> Chw :: wl > tl & t < timer ==> ! h_out_1
+	Chw -> Chw :: wl > tl & t = timer ==> h_out_1
+	
+}
+
+
+reactor Ecs  {
+	input chw : int
+    output wl : int
+    output tl : int
+    output out : bool
+	
+    contract SimpleEcs[wl <- wl]
+
+    {=
+		std::this_thread::sleep_for(std::chrono::milliseconds(std::rand() % 10));
+		
+		tl = 50;
+		wl += (chw % 10) - 4 - (wl > tl);
+		out = wl <= tl;
+    =}
+}
