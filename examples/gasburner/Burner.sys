@@ -12,10 +12,23 @@ contract SafeBurner {
 }
 
 
+contract LenientBurner {
+    input leak : bool
+    
+	clock timer : int
+	
+    Leaking -> Leaking :: leak ==> timer < 50
+	Leaking -> not_Leaking :: ! leak ==> timer < 50 # timer
+	not_Leaking -> not_Leaking :: ! leak ==> true
+	not_Leaking -> Leaking :: leak ==> timer >= 30 # timer
+	
+}
+
 reactor Burner  {
     state leak : bool
     output steps : int
     contract SafeBurner[leak <- leak]
+    contract LenientBurner[leak <- leak]
 
     {=
 		
@@ -34,6 +47,7 @@ reactor Burner  {
 reactor DirectBurner {
     state leak : bool
     contract SafeBurner[leak <- leak]
+    contract LenientBurner[leak <- leak]
 
     {=
 		if(!leak) {

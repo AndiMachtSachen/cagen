@@ -58,6 +58,10 @@ object CppGen {
                 .joinToString(",") {it.name}}
             };
             
+            #ifndef STOP_ON_EMPTY
+            #define STOP_ON_EMPTY 1
+            #endif
+            
             #ifdef FUZZY
             #include "q_value$headerExtension"
             #else
@@ -179,6 +183,7 @@ object CppGen {
                 }
                 void update();
                 void advance(int t_e, int t_s);
+                [[nodiscard]] bool should_stop() const;
                 friend std::ostream& operator<<(std::ostream& out, $monitorName const&);
             };
             
@@ -374,6 +379,15 @@ object CppGen {
                 return out;
             }
             
+            bool $monitorName::should_stop() const {
+                #if(STOP_ON_EMPTY)
+                if(states.empty()){
+                    return true;
+                }
+                #endif
+                return false;
+            }
+            
     """.trimIndent()
         writeCode(folder, contract.name, sourceExtension, code)
     }
@@ -404,6 +418,9 @@ object CppGen {
             
                 #include "${contract.name}$headerExtension"
                 
+                #ifndef MONITOR_RATE
+                #define MONITOR_RATE 100
+                #endif
                 #define EXIT(code) {std::cerr << "EXIT line " << __LINE__ << " with code " << code << std::endl;fflush(0);exit(code);}
                 
                 std::vector<std::string> split(const std::string& str, char delimiter) {
@@ -436,7 +453,9 @@ object CppGen {
                             file.close();
                             break;
                         }
-                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        #if(MONITOR_RATE)
+                        std::this_thread::sleep_for(std::chrono::milliseconds(MONITOR_RATE));
+                        #endif
                     }
                     std::vector<std::string> assignments = split(line, ',');
                     std::map<std::string, std::string> kvs;
@@ -465,10 +484,11 @@ object CppGen {
                     
                     $monitorName monitor;
                     
-                    int iteration = 0;
+                    long long iteration = 0;
                     while (true) {
+                        ++iteration;
                         auto kvs = read_kvs(filename);
-                        std::cout << "-------------------------------------------------------\n";
+                        std::cout << "------------------------------------------------------- ["<<iteration<<"]\n";
                         for (const auto& kv : kvs) {
                             std::cout << kv.first << " = " << kv.second << ", ";
                         }
@@ -488,6 +508,11 @@ object CppGen {
                         //process
                         monitor.update();
                         std::cout << monitor << '\n' << std::endl;
+                        
+                        //check exit condition. default configuration uses `STOP_ON_EMPTY' definition
+                        if(monitor.should_stop()){
+                            break;
+                        }
                     }
                     
                 }
