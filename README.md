@@ -106,6 +106,23 @@ $ java -jar build/libs/cagen-all.jar verify --output out Counter.sys
 ```
 which generates the proof obligations into the `out/` directory to discharged with cbmc, seahorn or nuXmv. 
 
+## Runtime verification
+You can compile the tool with Gradle by running
+```sh
+$ ./gradlew shadowJar
+```
+in the project directory.
+To generate the program code run 
+```sh
+$ java -jar ../../build/libs/cagen-all.jar rca Burner.sys
+```
+in the `examples/gasburner` directory.
+This generates the c++ source and header files for the monitor and the system implementation in the `rca_output` subdirectory.
+You can compile them using any c++17 compliant compiler.
+The system implementation source file is named after the respective `reactor`.
+The monitor implementation consists of the source file named after the `contract` and the `_monitor` file of the same name that should be compiled together.
+The system and monitor expect a path to the file for sending/receiving the timed input-output traces as the first command line argument.
+
 ## Case Study
 
 The case study for the paper is archived in `paper-experiments/`, where you can find `Counter` and `aeb` with their proof obligations, and a make file for discharging the proof. 
