@@ -36,10 +36,10 @@ object CppGen {
     fun writeMonitorHeader(contract: Contract, folder: Path) {
         val signature = contract.signature
         val name = contract.name
-        val monitorName = name+"Monitor"
-        val modeName = name+"Mode"
-        val stateName = name+"State"
-        val clockTraceName = name+"ClockTrace"
+        val monitorName = getMonitorName(name)
+        val modeName = getModeName(name)
+        val tokName = getTokenName(name)
+        val clockTraceName = getClockValuationTraceName(name)
 
         val code = """
             #pragma once
@@ -49,8 +49,10 @@ object CppGen {
             #include <iostream>
             #include <map>
             #include <vector>
+            #include <set>
             #include <deque>
             #include <string>
+            #include <tuple>
             
             enum class ClockId{
                 ${contract.signature.clocks
@@ -81,9 +83,9 @@ object CppGen {
                 ClockVal() noexcept = default;
                 ClockVal(int env, int sys) noexcept : _e{env}, _s{sys} {};
                 
-                value_type env() const { return _e; }
-                value_type sys() const { return _s; }
-                value_type total() const { return _e + _s; }
+                [[nodiscard]] value_type env() const { return _e; }
+                [[nodiscard]] value_type sys() const { return _s; }
+                [[nodiscard]] value_type total() const { return _e + _s; }
                 
                 void reset() {
                     _e = _s = 0;
@@ -91,6 +93,14 @@ object CppGen {
                 void advance(int t_e, int t_s) {
                     _e += t_e;
                     _s += t_s;
+                }
+                
+                //lexicographical comparison for token deduplication
+                [[nodiscard]] bool operator<(ClockVal const& rhs) const {
+                    return std::tie(_e, _s) < std::tie(rhs._e, rhs._s);
+                }
+                [[nodiscard]] bool operator==(ClockVal const& rhs) const {
+                    return std::tie(_e, _s) == std::tie(rhs._e, rhs._s);
                 }
             };
             template<int clock_id>
@@ -107,6 +117,7 @@ object CppGen {
             
             using std::map;
             using std::vector;
+            using std::set;
             using std::deque; 
             using std::string;
             struct $clockTraceName{
@@ -114,6 +125,19 @@ object CppGen {
                 .filter { !it.name.isSuffixedClock() }
                 .joinToString("") {"""
                     deque<ClockVal<(int)ClockId::${it.name}>> ${it.name}_trace;"""}
+                }
+                
+                //lexicographical comparison for token deduplication
+                [[nodiscard]] bool operator<($clockTraceName const& rhs) const {
+                    return std::tie(
+                    ${contract.signature.clocks
+                    .filter { !it.name.isSuffixedClock() }
+                    .joinToString(",") {"${it.name}_trace"}
+                    }) < std::tie(
+                    ${contract.signature.clocks
+                    .filter { !it.name.isSuffixedClock() }
+                    .joinToString(",") {"rhs.${it.name}_trace"}
+                    }); 
                 }
             };
     
@@ -136,14 +160,29 @@ object CppGen {
                 return out << "]";
             }
             
-            struct $stateName {
+            struct $tokName {
                 $modeName mode;
                 $clockTraceName clock_traces;
                 #ifdef FUZZY
                 Q_Value q_assume;
                 Q_Value q_guarantee;
                 #endif
+                
+                //lexicographical comparison for token deduplication
+                [[nodiscard]] bool operator<($tokName const& rhs) const {
+                    #ifdef FUZZY
+                    return std::tie(mode, clock_traces, q_assume, q_guarantee) < std::tie(rhs.mode, rhs.clock_traces, rhs.q_assume, rhs.q_guarantee);
+                    #else
+                    return std::tie(mode, clock_traces) < std::tie(rhs.mode, rhs.clock_traces);
+                    #endif
+                }
             };
+            
+            #if(DEDUPLICATE_TOKENS)
+            using ToksT = std::set<$tokName>;
+            #else
+            using ToksT = std::vector<$tokName>;
+            #endif
             
             struct $monitorName {
                 //inputs
@@ -152,8 +191,9 @@ object CppGen {
                 ${signature.outputs.declareMembers()}
                 //internals
                 ${signature.internals.declareMembers()}
-                //states
-                vector<$stateName> states;
+                //tokens
+                ToksT tokens;
+                
                 //history${
                     contract.history.filter { contract.signature.clocks.none { v -> v.name == it.first } }.joinToString("") { (name, depth) ->
                         val type = contract.signature.get(name)?.type?.toC()
@@ -176,8 +216,8 @@ object CppGen {
                     .toList().joinToString("") { """
                     initial_clock_val.${it.name}_trace = deque<ClockVal<(int)ClockId::${it.name}>>{ClockVal<(int)ClockId::${it.name}>{}};"""}
                     }
-                    states = vector<$stateName>{${contract.states.filter { it[0].isLowerCase() }.joinToString(", ") { 
-                        "$stateName{$modeName::$it, initial_clock_val}"
+                    tokens = ToksT{${contract.states.filter { it[0].isLowerCase() }.joinToString(", ") { 
+                        "$tokName{$modeName::$it, initial_clock_val}"
                     }}};
                     
                 }
@@ -223,10 +263,9 @@ object CppGen {
 
     fun writeMonitorTu(contract: Contract, folder: Path) {
         val name = contract.name
-        val monitorName = name+"Monitor"
-        val stateName = name+"State"
-        val modeName = name+"Mode"
-        val stateVars = contract.signature.inputs + contract.signature.outputs
+        val monitorName = getMonitorName(name)
+        val tokName = getTokenName(name)
+        val modeName = getModeName(name)
 
         val code = """
             #include "$name$headerExtension"
@@ -241,13 +280,26 @@ object CppGen {
             
             void $monitorName::advance(int t_e, int t_s) {
                 std::cout << "Advance monitor by t_e = "<<t_e<<", t_s = "<<t_s<<std::endl;
-                for(auto& state : states) {
+                #if(DEDUPLICATE_TOKENS)
+                ToksT next_toks;
+                for(auto tok : tokens) {
                     ${contract.signature.clocks
                     .filter { !it.name.isSuffixedClock() }
                     .joinToString("") {"""
-                    state.clock_traces.${it.name}_trace.back().advance(t_e, t_s);
+                    tok.clock_traces.${it.name}_trace.back().advance(t_e, t_s);
+                    """}}
+                    next_toks.insert(std::move(tok));
+                }
+                tokens = std::move(next_toks);
+                #else
+                for(auto& tok : tokens) {
+                    ${contract.signature.clocks
+                    .filter { !it.name.isSuffixedClock() }
+                    .joinToString("") {"""
+                    tok.clock_traces.${it.name}_trace.back().advance(t_e, t_s);
                     """}}
                 }
+                #endif
             }
             
             void $monitorName::update() {
@@ -263,27 +315,31 @@ object CppGen {
                 """
                 }}
                 
-                //update states
-                vector<$stateName> next_states;
+                //update token marking
+                ToksT next_tokens;
                 bool any_pre = false;
-                for(auto& state : states) {
+                #if(DEDUPLICATE_TOKENS)
+                for(auto tok : tokens) {
+                #else
+                for(auto& tok : tokens) {
+                #endif
                     ${contract.signature.clocks
                     .filter { !it.name.isSuffixedClock() }
                     .joinToString("") {"""
-                    auto ${it.name} = state.clock_traces.${it.name}_trace.back().total();
-                    auto ${it.name}_e = state.clock_traces.${it.name}_trace.back().env();
-                    auto ${it.name}_s = state.clock_traces.${it.name}_trace.back().sys();
+                    auto ${it.name} = tok.clock_traces.${it.name}_trace.back().total();
+                    auto ${it.name}_e = tok.clock_traces.${it.name}_trace.back().env();
+                    auto ${it.name}_s = tok.clock_traces.${it.name}_trace.back().sys();
                     """}}
                     ${contract.signature.clocks.filter { x -> !x.name.isSuffixedClock() && contract.history.none { it.first == x.name } }.joinToString("") { """
-                    if(state.clock_traces.${it.name}_trace.size() > 1)state.clock_traces.${it.name}_trace.pop_front();""" }}
+                    if(tok.clock_traces.${it.name}_trace.size() > 1)tok.clock_traces.${it.name}_trace.pop_front();""" }}
                     ${contract.history.filter { !it.first.isSuffixedClock() && contract.signature.clocks.any { v -> v.name == it.first } }.joinToString("") { (name, depth) -> """
-                    if(state.clock_traces.${name}_trace.size() > $depth + 1)state.clock_traces.${name}_trace.pop_front();""" +
+                    if(tok.clock_traces.${name}_trace.size() > $depth + 1)tok.clock_traces.${name}_trace.pop_front();""" +
                     (1..depth).joinToString("") {"""
-                    auto h_${name}_${it} = ClockHistoryEntry<ClockKind::total>(state.clock_traces, "$name", $it);
-                    auto h_${envClockName(name)}_${it} = ClockHistoryEntry<ClockKind::env>(state.clock_traces, "$name", $it);
-                    auto h_${sysClockName(name)}_${it} = ClockHistoryEntry<ClockKind::sys>(state.clock_traces, "$name", $it);"""
+                    auto h_${name}_${it} = ClockHistoryEntry<ClockKind::total>(tok.clock_traces, "$name", $it);
+                    auto h_${envClockName(name)}_${it} = ClockHistoryEntry<ClockKind::env>(tok.clock_traces, "$name", $it);
+                    auto h_${sysClockName(name)}_${it} = ClockHistoryEntry<ClockKind::sys>(tok.clock_traces, "$name", $it);"""
                     }}}
-                    switch(state.mode) {
+                    switch(tok.mode) {
                         ${contract.transitions.groupBy { it.from }.toList().joinToString("""
                         """) { "case $modeName::${it.first}: {" +
                         it.second.joinToString("") {
@@ -291,17 +347,17 @@ object CppGen {
                             try{
                             Q_Value pre_cond = ${it.contract.pre.toCExpr()};
                             #ifdef FUZZY
-                            pre_cond = state.q_assume && pre_cond;
+                            pre_cond = tok.q_assume && pre_cond;
                             #endif
                             if(pre_cond) {
                                 any_pre = true;
                                 try{
                                 Q_Value post_cond = ${it.contract.post.toCExpr()};
                                 #ifdef FUZZY
-                                post_cond = state.q_guarantee && post_cond;
+                                post_cond = tok.q_guarantee && post_cond;
                                 #endif
                                 if(post_cond) {
-                                    auto new_clock_traces = state.clock_traces;
+                                    auto new_clock_traces = tok.clock_traces;
                                     ${contract.signature.clocks
                                     .filter { !it.name.isSuffixedClock() }
                                     .joinToString("") {"""
@@ -316,9 +372,15 @@ object CppGen {
                                     """        
                                     }}
                                     #ifdef FUZZY
-                                    next_states.emplace_back($stateName{$modeName::${it.to}, std::move(new_clock_traces), pre_cond, post_cond});
+                                    auto new_tok = $tokName{$modeName::${it.to}, std::move(new_clock_traces), pre_cond, post_cond};
                                     #else
-                                    next_states.emplace_back($stateName{$modeName::${it.to}, std::move(new_clock_traces)});
+                                    auto new_tok = $tokName{$modeName::${it.to}, std::move(new_clock_traces)};
+                                    #endif
+                                    
+                                    #if(DEDUPLICATE_TOKENS)
+                                    next_tokens.insert(std::move(new_tok));
+                                    #else
+                                    next_tokens.emplace_back(std::move(new_tok));
                                     #endif
                                 }
                                 } catch(InvalidTimeAccess const& time_err) {
@@ -335,12 +397,13 @@ object CppGen {
                     }
                 
                 }
-                states = std::move(next_states);
+                tokens = std::move(next_tokens);
                 
+                //check termination condition if not already terminated 
                 if(!ENVIRONMENT_LOSES && !SYSTEM_LOSES) {
                     if(!any_pre) {
                         ENVIRONMENT_LOSES = true;
-                    }else if(states.empty()) {
+                    }else if(tokens.empty()) {
                         SYSTEM_LOSES = true;
                     }
                 }
@@ -357,18 +420,18 @@ object CppGen {
                 //internals
                 ${contract.signature.internals.printVars()}
                 ${if(contract.signature.internals.isNotEmpty()){"""out << '\n';"""}else{""}}
-                //states
-                for(auto const& state : monitor.states) {
+                //tokens
+                for(auto const& tok : monitor.tokens) {
                     #ifdef FUZZY
-                    out << "      " << state.mode << "    ("<<state.q_assume<<","<<state.q_guarantee<<")\n";
+                    out << "      " << tok.mode << "    ("<<tok.q_assume<<","<<tok.q_guarantee<<")\n";
                     #else
-                    out << "      " << state.mode << "\n";
+                    out << "      " << tok.mode << "\n";
                     #endif
                     
                     ${contract.signature.clocks
                     .filter { !it.name.isSuffixedClock() }
                     .joinToString("") {"""
-                    out << "        ${it.name}\n           " << state.clock_traces.${it.name}_trace << "\n"; 
+                    out << "        ${it.name}\n           " << tok.clock_traces.${it.name}_trace << "\n"; 
                     """
                     }}
                 }
@@ -381,7 +444,7 @@ object CppGen {
             
             bool $monitorName::should_stop() const {
                 #if(STOP_ON_EMPTY)
-                if(states.empty()){
+                if(tokens.empty()){
                     return true;
                 }
                 #endif
@@ -395,10 +458,9 @@ object CppGen {
     fun writeMainTu(contract: Contract, variableMap: MutableList<Pair<String, IOPort>>, folder: Path) {
 
         val name = contract.name
-        val monitorName = name+"Monitor"
-        val stateName = name+"State"
-        val modeName = name+"Mode"
-        val stateVars = contract.signature.inputs + contract.signature.outputs
+        val monitorName = getMonitorName(name)
+        val tokName = getTokenName(name)
+        val modeName = getModeName(name)
         val code = """ 
                 #include <cstdlib>
                 #include <cstdio>
@@ -423,14 +485,14 @@ object CppGen {
                 #endif
                 #define EXIT(code) {std::cerr << "EXIT line " << __LINE__ << " with code " << code << std::endl;fflush(0);exit(code);}
                 
-                std::vector<std::string> split(const std::string& str, char delimiter) {
-                    std::vector<std::string> tokens;
-                    std::string token;
-                    std::istringstream tokenStream(str);
-                    while (std::getline(tokenStream, token, delimiter)) {
-                        tokens.push_back(token);
+                std::vector<std::string> split(std::string const& str, char delimiter) {
+                    std::vector<std::string> words;
+                    std::string word;
+                    std::istringstream word_stream(str);
+                    while (std::getline(word_stream, word, delimiter)) {
+                        words.push_back(std::move(word));
                     }
-                    return tokens;
+                    return words;
                 }
                 
                 std::map<std::string, std::string> read_kvs(char const* filename) {
@@ -1003,3 +1065,8 @@ fun envClockName(clockName : String) = clockName + envClockNameSuffix
 fun sysClockName(clockName : String) = clockName + sysClockNameSuffix
 
 fun String.isSuffixedClock():Boolean = this.endsWith(envClockNameSuffix) || this.endsWith(sysClockNameSuffix)
+
+fun getMonitorName(rcaName : String) = rcaName + "Monitor"
+fun getModeName(rcaName : String) = rcaName + "Mode"
+fun getTokenName(rcaName : String) = rcaName + "Tok"
+fun getClockValuationTraceName(rcaName : String) = rcaName + "ClockValTrace"

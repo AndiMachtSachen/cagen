@@ -11,12 +11,10 @@ contract SafeEcs {
 	open -> Closing :: wl > tl ==> true #timer
 	Closing -> Closing :: ! gate_closed ==> timer < duration
 	Closing -> Closed :: gate_closed ==> true
-	Closed -> Closed :: wl > tl ==> true
-	Closed -> Opening :: wl <= tl ==> true #timer
+	Closed -> Closed :: wl >= tl ==> true
+	Closed -> Opening :: wl < tl ==> true #timer
 	Opening -> Opening :: gate_closed ==> timer < duration
 	Opening -> open :: ! gate_closed ==> true
-	
-	
 }
 
 
@@ -38,13 +36,59 @@ contract SafeEcsSkip {
 	Closed -> open :: wl <= tl & ! gate_closed ==> true #timer
 	Opening -> Opening :: gate_closed ==> timer < duration
 	Opening -> open :: ! gate_closed ==> true
-	
-	
 }
 
-
+contract NonDetEcs {
+    output wl : int
+    output tl : int
+    output gate_closed : bool
+    output duration : int
+	
+	clock timer : int
+	
+	open -> open :: wl <= tl ==> true
+	open -> Closing :: wl >= tl ==> true #timer
+	Closing -> Closing :: ! gate_closed ==> timer < duration
+	Closing -> closed :: gate_closed ==> true
+	closed -> closed :: wl >= tl ==> true
+	closed -> Opening :: wl <= tl ==> true #timer
+	Opening -> Opening :: gate_closed ==> timer < duration
+	Opening -> open :: ! gate_closed ==> true	
+}
 
 reactor Ecs  {
+	input chw : int
+    output wl : int
+    output tl : int
+    output duration : int
+    output gate_closed : bool
+	
+	output target_lvl : int
+	
+    contract SafeEcs[wl <- wl]
+    contract SafeEcsSkip[wl <- wl]
+    contract NonDetEcs[wl <- wl]
+
+    {=
+		duration = 15;
+		tl = 50;
+		
+		std::this_thread::sleep_for(std::chrono::milliseconds(std::rand() % 10));
+		
+		if(wl == target_lvl) {
+			target_lvl = std::rand() % 10 + 20;
+			if(std::rand() % 2){
+				target_lvl = 2 * tl - target_lvl;
+			}
+		}
+		if(wl > target_lvl)--wl;
+		else ++wl;
+		
+		gate_closed = wl > tl;
+    =}
+}
+
+reactor FluctuateEcs  {
 	input chw : int
     output wl : int
     output tl : int
@@ -71,20 +115,31 @@ reactor DelayEcs  {
     output wl : int
     output tl : int
     output duration : int
-    output next_gate_closed : bool
     output gate_closed : bool
+    output gate_closed_next_1 : bool
+    output gate_closed_next_2 : bool
+	output target_lvl : int
 	
     contract SafeEcs[wl <- wl]
     contract SafeEcsSkip[wl <- wl]
 
     {=
+		duration = 15;
+		tl = 50;
+		
 		std::this_thread::sleep_for(std::chrono::milliseconds(std::rand() % 10));
 		
-		tl = 50;
-		duration = 15;
-		wl += (chw % 10) - 4 - (wl > tl);
-																																		wl = std::rand() % 100;
-		gate_closed = next_gate_closed;
-		next_gate_closed = wl > tl;
+		if(wl == target_lvl) {
+			target_lvl = std::rand() % 10 + 20;
+			if(std::rand() % 2){
+				target_lvl = 2 * tl - target_lvl;
+			}
+		}
+		if(wl > target_lvl)--wl;
+		else ++wl;
+		
+		gate_closed = gate_closed_next_1;
+		gate_closed_next_1 = gate_closed_next_2;
+		gate_closed_next_2 = wl > tl;
     =}
 }
