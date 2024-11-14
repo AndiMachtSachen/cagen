@@ -29,6 +29,7 @@ object CppGen {
         writeMonitorHeader(contract.contract, folder)
         writeFuzzyHeader(folder)
         writeFuzzyDefaultImpl(folder)
+        writeRingBufferImpl(folder)
         writeMonitorTu(contract.contract, folder)
         writeMainTu(contract.contract, contract.variableMap, folder)
     }
@@ -60,6 +61,19 @@ object CppGen {
                 .joinToString(",") {it.name}}
             };
             
+            [[nodiscard]] constexpr int clock_trace_capacity(ClockId clock_id) {
+            	switch(clock_id){
+                    //clocks with history
+                    ${contract.history.filter {
+                        !it.first.isSuffixedClock() && contract.signature.clocks.any { v -> v.name == it.first }
+                    }.joinToString("") { (name, depth) -> """
+                    case ClockId::${name}: return 1 + $depth; """
+                    }}
+            		//clocks without history
+                    default: return 1;
+            	}
+            }
+            
             #ifndef STOP_ON_EMPTY
             #define STOP_ON_EMPTY 1
             #endif
@@ -71,6 +85,27 @@ object CppGen {
             using ClockVar = T;
             
             using Q_Value = bool;
+            #endif
+            
+            #ifdef RINGBUFFER
+            
+            #include "ring_buffer.hpp"
+            
+            template<typename T, std::size_t N>
+            std::ostream& operator<<(std::ostream& out, ring_buffer<T,N> const& v) {
+                out << "[";
+                for(auto it = v.begin(); it != v.end(); ++it) {
+                    if(it != v.begin()) out << ",";
+                    out << *it;
+                }
+                return out << "]";
+            }
+            
+            template<typename T, int cap>
+            using TraceT = ring_buffer<T, cap + 1>;
+            #else
+            template<typename T, int cap>
+            using TraceT = std::deque<T>;
             #endif
             
             template<int clock_id>
@@ -124,7 +159,7 @@ object CppGen {
                  ${contract.signature.clocks
                 .filter { !it.name.isSuffixedClock() }
                 .joinToString("") {"""
-                    deque<ClockVal<(int)ClockId::${it.name}>> ${it.name}_trace;"""}
+                    TraceT<ClockVal<(int)ClockId::${it.name}>, clock_trace_capacity(ClockId::${it.name})> ${it.name}_trace;"""}
                 }
                 
                 //lexicographical comparison for token deduplication
@@ -159,7 +194,6 @@ object CppGen {
                 }
                 return out << "]";
             }
-            
             struct $tokName {
                 $modeName mode;
                 $clockTraceName clock_traces;
@@ -214,7 +248,7 @@ object CppGen {
                     ${contract.signature.clocks
                     .filter { !it.name.isSuffixedClock() }
                     .toList().joinToString("") { """
-                    initial_clock_val.${it.name}_trace = deque<ClockVal<(int)ClockId::${it.name}>>{ClockVal<(int)ClockId::${it.name}>{}};"""}
+                    initial_clock_val.${it.name}_trace = TraceT<ClockVal<(int)ClockId::${it.name}>, clock_trace_capacity(ClockId::${it.name})>{ClockVal<(int)ClockId::${it.name}>{}};"""}
                     }
                     tokens = ToksT{${contract.states.filter { it[0].isLowerCase() }.joinToString(", ") { 
                         "$tokName{$modeName::$it, initial_clock_val}"
@@ -231,7 +265,7 @@ object CppGen {
             
             template<ClockKind clock_kind, int clock_id>
             class ClockHistoryEntry {
-                using trace_type = deque<ClockVal<clock_id>>; 
+                using trace_type = TraceT<ClockVal<clock_id>, clock_trace_capacity((ClockId)clock_id)>; 
             	trace_type* trace;
             	int depth;
             	
@@ -240,7 +274,7 @@ object CppGen {
                     trace{&trace}, depth{depth} {}
             	
             	[[nodiscard]] operator int() const {
-                    if(depth < trace.size()) {
+                    if(depth < trace->size()) {
                         auto const& clock = (*trace)[trace->size() - depth - 1];
                         switch(clock_kind) {
                             case ClockKind::env: return clock.env();
@@ -330,15 +364,31 @@ object CppGen {
                     auto ${it.name}_e = tok.clock_traces.${it.name}_trace.back().env();
                     auto ${it.name}_s = tok.clock_traces.${it.name}_trace.back().sys();
                     """}}
-                    ${contract.signature.clocks.filter { x -> !x.name.isSuffixedClock() && contract.history.none { it.first == x.name } }.joinToString("") { """
+                    #ifndef RINGBUFFER
+                    ${contract.signature.clocks.filter {
+                        x -> !x.name.isSuffixedClock() && contract.history.none { it.first == x.name } 
+                    }.joinToString("") { """
                     if(tok.clock_traces.${it.name}_trace.size() > 1)tok.clock_traces.${it.name}_trace.pop_front();""" }}
-                    ${contract.history.filter { !it.first.isSuffixedClock() && contract.signature.clocks.any { v -> v.name == it.first } }.joinToString("") { (name, depth) -> """
+                    ${contract.history.filter {
+                        !it.first.isSuffixedClock() && contract.signature.clocks.any { v -> v.name == it.first } 
+                    }.joinToString("") { (name, depth) -> """
                     if(tok.clock_traces.${name}_trace.size() > $depth + 1)tok.clock_traces.${name}_trace.pop_front();""" +
                     (1..depth).joinToString("") {"""
-                    auto h_${name}_${it} = ClockHistoryEntry<ClockKind::total>(tok.clock_traces, "$name", $it);
-                    auto h_${envClockName(name)}_${it} = ClockHistoryEntry<ClockKind::env>(tok.clock_traces, "$name", $it);
-                    auto h_${sysClockName(name)}_${it} = ClockHistoryEntry<ClockKind::sys>(tok.clock_traces, "$name", $it);"""
+                    auto h_${name}_${it} = ClockHistoryEntry<ClockKind::total,(int)ClockId::$name>(tok.clock_traces.${name}_trace, $it);
+                    auto h_${envClockName(name)}_${it} = ClockHistoryEntry<ClockKind::env,(int)ClockId::$name>(tok.clock_traces.${name}_trace, $it);
+                    auto h_${sysClockName(name)}_${it} = ClockHistoryEntry<ClockKind::sys,(int)ClockId::$name>(tok.clock_traces.${name}_trace, $it);"""
                     }}}
+                    #else
+                    //ring_buffer automatically overrides old values
+                    ${contract.history.filter {
+                        !it.first.isSuffixedClock() && contract.signature.clocks.any { v -> v.name == it.first }
+                    }.joinToString("") { (name, depth) -> 
+                    (1..depth).joinToString("") {"""
+                    auto h_${name}_${it} = ClockHistoryEntry<ClockKind::total,(int)ClockId::$name>(tok.clock_traces.${name}_trace, $it);
+                    auto h_${envClockName(name)}_${it} = ClockHistoryEntry<ClockKind::env,(int)ClockId::$name>(tok.clock_traces.${name}_trace, $it);
+                    auto h_${sysClockName(name)}_${it} = ClockHistoryEntry<ClockKind::sys,(int)ClockId::$name>(tok.clock_traces.${name}_trace, $it);"""
+                    }}}
+                    #endif
                     switch(tok.mode) {
                         ${contract.transitions.groupBy { it.from }.toList().joinToString("""
                         """) { "case $modeName::${it.first}: {" +
@@ -590,6 +640,10 @@ object CppGen {
         writeCode(folder, "fuzzy_impl", headerExtension, fuzzyImplCode)
     }
 
+    fun writeRingBufferImpl(folder: Path) {
+        writeCode(folder, "ring_buffer", headerExtension, ringBufferCode)
+    }
+
     fun writeSystemTu(system: System, folder: Path) {
         val signature = system.signature
         val name = system.name
@@ -721,7 +775,176 @@ object CppGen {
     private fun Iterable<Variable>.writeVars(nameSuffix : String = "") = joinToString("\n                    ") { "file << \"${it.name+nameSuffix}=\" << state.${it.name+nameSuffix} << ',';" }
 
 }
+private const val ringBufferCode = """
+#include <utility>
+#include <cstddef>
+#include <new>
+#include <initializer_list>
+#include <algorithm>
 
+//STL compatible container
+//only supports the member functions I need.
+template <typename T, std::size_t N>
+class ring_buffer {
+public:
+
+    class iterator {
+    public:
+
+        iterator(ring_buffer* buffer, size_t index, size_t count)
+            : buffer_(buffer), index_(index), remaining_(count) {}
+
+        T& operator*() { return buffer_->data()[index_]; }
+        T* operator->() { return &buffer_->data()[index_]; }
+
+        iterator& operator++() {
+            index_ = (index_ + 1) % N;
+            --remaining_;
+            return *this;
+        }
+
+        iterator operator++(int) {
+            iterator temp = *this;
+            ++(*this);
+            return temp;
+        }
+
+        bool operator==(const iterator& other) const {
+            return buffer_ == other.buffer_ && remaining_ == other.remaining_;
+        }
+
+        bool operator!=(const iterator& other) const {
+            return !(*this == other);
+        }
+
+    private:
+        ring_buffer* buffer_;
+        size_t index_;
+        size_t remaining_;
+    };
+    class const_iterator {
+    public:
+        
+        const_iterator(ring_buffer const* buffer, size_t index, size_t count)
+            : buffer_(buffer), index_(index), remaining_(count) {}
+
+        T const& operator*() { return buffer_->data()[index_]; }
+        T const* operator->() { return &buffer_->data()[index_]; }
+
+        const_iterator& operator++() {
+            index_ = (index_ + 1) % N;
+            --remaining_;
+            return *this;
+        }
+
+        const_iterator operator++(int) {
+            const_iterator temp = *this;
+            ++(*this);
+            return temp;
+        }
+
+        bool operator==(const const_iterator& other) const {
+            return buffer_ == other.buffer_ && remaining_ == other.remaining_;
+        }
+        
+        bool operator<(const const_iterator& other) const {
+            return remaining_ > other.remaining_;
+        }
+
+        bool operator!=(const const_iterator& other) const {
+            return !(*this == other);
+        }
+        
+        int operator-(const_iterator const& other) const {
+            return -( remaining_ - other.remaining_);
+        }
+
+    private:
+        ring_buffer const* buffer_;
+        size_t index_;
+        size_t remaining_;
+    };
+
+    ring_buffer() : start_(0), end_(0), count_(0) {}
+    ring_buffer(std::initializer_list<T> values) : ring_buffer() {
+        for(auto v : values) {
+            push_back(std::move(v));
+        }
+    }
+    ~ring_buffer() { clear(); }
+
+    bool empty() const { return count_ == 0; }
+    size_t size() const { return count_; }
+    size_t count() const { return count_; }
+    size_t capacity() const { return N; }
+
+    void clear() {
+        for (size_t i = 0; i < count_; ++i) {
+            data()[(start_ + i) % N].~T();
+        }
+        count_ = 0;
+        start_ = 0;
+        end_ = 0;
+    }
+
+    void push_back(const T& value) {
+        if (count_ == N) {
+            data()[start_].~T();
+            start_ = (start_ + 1) % N;
+        } else {
+            ++count_;
+        }
+        new (&data()[end_]) T(value);
+        end_ = (end_ + 1) % N;
+    }
+
+    ring_buffer& operator=(const ring_buffer& other) {
+        if (this != &other) {
+            clear();
+            for (const auto& item : other) {
+                push_back(item);
+            }
+        }
+        return *this;
+    }
+
+    const_iterator begin() const { return const_iterator(this, start_, count_); }
+    const_iterator end() const { return const_iterator(this, end_, 0); }
+    iterator begin() { return iterator(this, start_, count_); }
+    iterator end() { return iterator(this, end_, 0); }
+	T& operator[](size_t idx) {
+		return data()[(start_ + idx) % N];
+	}
+	T const& operator[](size_t idx) const {
+		return data()[(start_ + idx) % N];
+	}
+	T const& back() const {
+		return (*this)[count_-1];
+	}
+	T& back() {
+		return (*this)[count_-1];
+	}
+    bool operator<(ring_buffer const& rhs) const {
+        if(size() != rhs.size()){
+            return size() < rhs.size();
+        }
+        for(int i = 0; i < count_; ++i) {
+            if((*this)[i] < rhs[i]) return true;
+            if(rhs[i] < (*this)[i]) return false;
+        }
+        return false;
+    }
+private:
+    alignas(T) char buffer_[N * sizeof(T)];
+    size_t start_;
+    size_t end_;
+    size_t count_;
+
+    T* data() { return reinterpret_cast<T*>(buffer_); }
+    const T* data() const { return reinterpret_cast<const T*>(buffer_); }
+};
+
+"""
 private const val fuzzyImplCode = """
 #include <algorithm>
 inline Q_Value negate(Q_Value const& q){
