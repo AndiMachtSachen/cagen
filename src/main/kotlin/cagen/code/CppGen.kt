@@ -282,7 +282,7 @@ object CppGen {
                             case ClockKind::total: return clock.total();
                         }
                     }else{
-                        #ifdef CLOCK_USE_DEFAULT
+                        #ifndef ERROR_TRACE_ACCESS
                         return 0;
                         #else
                         throw InvalidTimeAccess{};
@@ -365,14 +365,18 @@ object CppGen {
                     auto ${it.name}_s = tok.clock_traces.${it.name}_trace.back().sys();
                     """}}
                     #ifndef RINGBUFFER
+                    #ifndef UNBOUNDED_TRACE
                     ${contract.signature.clocks.filter {
                         x -> !x.name.isSuffixedClock() && contract.history.none { it.first == x.name } 
                     }.joinToString("") { """
                     if(tok.clock_traces.${it.name}_trace.size() > 1)tok.clock_traces.${it.name}_trace.pop_front();""" }}
+                    #endif
                     ${contract.history.filter {
                         !it.first.isSuffixedClock() && contract.signature.clocks.any { v -> v.name == it.first } 
                     }.joinToString("") { (name, depth) -> """
-                    if(tok.clock_traces.${name}_trace.size() > $depth + 1)tok.clock_traces.${name}_trace.pop_front();""" +
+                    #ifndef UNBOUNDED_TRACE
+                    if(tok.clock_traces.${name}_trace.size() > $depth + 1)tok.clock_traces.${name}_trace.pop_front();
+                    #endif""" +
                     (1..depth).joinToString("") {"""
                     auto h_${name}_${it} = ClockHistoryEntry<ClockKind::total,(int)ClockId::$name>(tok.clock_traces.${name}_trace, $it);
                     auto h_${envClockName(name)}_${it} = ClockHistoryEntry<ClockKind::env,(int)ClockId::$name>(tok.clock_traces.${name}_trace, $it);
