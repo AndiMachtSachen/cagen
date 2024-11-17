@@ -119,8 +119,23 @@ $ java -jar ../../build/libs/cagen-all.jar rca Burner.sys
 in the `examples/gasburner` directory.
 This generates the c++ source and header files for the monitor and the system implementation in the `rca_output` subdirectory.
 You can compile them using any c++17 compliant compiler.
+The supported flags for the monitor are:
+
+| Flag               | Description                                                                           |
+|--------------------|---------------------------------------------------------------------------------------|
+| MONITOR_RATE       | specify optional re-check rate to wait if system update is not ready                  |
+| STOP_ON_EMPTY      | stop processing a trace when no tokens remain                                         |
+| UNBOUNDED_TRACE    | keep all previous values in a trace                                                   |
+| DISPLAY_TRACES     | display clock valuation traces                                                        |
+| DISPLAY_IOT        | display timed input-output values                                                     |
+| RINGBUFFER         | use ringbuffer for bounded traces                                                     |
+| FUZZY              | use fuzzy implementation                                                              |
+| DEDUPLICATE_TOKENS | deduplicate equivalent tokens                                                         |
+| ERROR_TRACE_ACCESS | treat out of bounds `old` access as contract violation instead of using default value |
+
 The system implementation source file is named after the respective `reactor`.
 The monitor implementation consists of the source file named after the `contract` and the `_monitor` file of the same name that should be compiled together.
+The customization points for the fuzzy implementation are in `fuzzy_impl.hpp`.
 The system and monitor expect a path to the file for sending/receiving the timed input-output traces as the first command line argument.
 
 ## Case Study
