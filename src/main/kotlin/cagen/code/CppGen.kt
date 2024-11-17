@@ -77,6 +77,12 @@ object CppGen {
             #ifndef STOP_ON_EMPTY
             #define STOP_ON_EMPTY 1
             #endif
+            #ifndef DISPLAY_TRACES
+            #define DISPLAY_TRACES 1
+            #endif
+            #ifndef DISPLAY_IOT
+            #define DISPLAY_IOT 1
+            #endif
             
             #ifdef FUZZY
             #include "q_value$headerExtension"
@@ -605,10 +611,12 @@ object CppGen {
                         ++iteration;
                         auto kvs = read_kvs(filename);
                         std::cout << "------------------------------------------------------- ["<<iteration<<"]\n";
+                        #if(DISPLAY_IOT)
                         for (const auto& kv : kvs) {
                             std::cout << kv.first << " = " << kv.second << ", ";
                         }
                         std::cout << std::endl;
+                        #endif
                         
                         auto te = std::stoi(kvs["${envClockName(tClockName)}"]);
                         auto ts = std::stoi(kvs["${sysClockName(tClockName)}"]);
@@ -623,7 +631,10 @@ object CppGen {
                         
                         //process
                         monitor.update();
+                        
+                        #if(DISPLAY_TRACES)
                         std::cout << monitor << '\n' << std::endl;
+                        #endif
                         
                         //check exit condition. default configuration uses `STOP_ON_EMPTY' definition
                         if(monitor.should_stop()){
