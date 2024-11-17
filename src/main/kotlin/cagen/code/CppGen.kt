@@ -407,14 +407,14 @@ object CppGen {
                             try{
                             Q_Value pre_cond = ${it.contract.pre.toCExpr()};
                             #ifdef FUZZY
-                            pre_cond = tok.q_assume && pre_cond;
+                            pre_cond = q_combine(tok.q_assume, pre_cond);
                             #endif
                             if(pre_cond) {
                                 any_pre = true;
                                 try{
                                 Q_Value post_cond = ${it.contract.post.toCExpr()};
                                 #ifdef FUZZY
-                                post_cond = tok.q_guarantee && post_cond;
+                                post_cond = q_combine(tok.q_guarantee, post_cond);
                                 #endif
                                 if(post_cond) {
                                     auto new_clock_traces = tok.clock_traces;
@@ -963,27 +963,31 @@ private:
 private const val fuzzyImplCode = """
 #include <algorithm>
 inline Q_Value negate(Q_Value const& q){
-    //standard negation
+    //default to standard negation
     return Q_Value(1 - q.v);
 }
 inline Q_Value t_norm(Q_Value const& q1, Q_Value const& q2){
-    //min norm
+    //default to min norm
     return Q_Value(std::min(q1.v, q2.v));
 }
 inline Q_Value s_norm(Q_Value const& q1, Q_Value const& q2){
-    //max norm
+    //default to max norm
     return Q_Value(std::max(q1.v, q2.v));
 }
 
 template<int id, typename T1, typename T2>
 auto eq_substitution(T1 v1, T2 v2) {
-    //normal non-fuzzy behaviour
+    //default to non-fuzzy behaviour
 	return Q_Value(v1 == v2);
 }
 template<int id, typename T1, typename T2>
 auto lt_substitution(T1 v1, T2 v2) {
-	//normal non-fuzzy behaviour
+	//default to non-fuzzy behaviour
 	return Q_Value(v1 < v2);
+}
+constexpr Q_Value q_combine(Q_Value const& lhs, Q_Value const& rhs) {
+    //default to t-norm
+    return t_norm(lhs, rhs);
 }
 """
 private const val qValueCode = """
@@ -1003,6 +1007,10 @@ class Q_Value {
 
     friend std::ostream& operator<<(std::ostream& os, Q_Value const& q) {
         return os << "Q("<<q.v<<")";
+    }
+    
+    bool operator<(Q_Value const& rhs) const {
+        return v < rhs.v;
     }
 };
 #include "fuzzy_impl${CppGen.headerExtension}"
