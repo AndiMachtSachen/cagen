@@ -4,16 +4,17 @@ contract SafeEcs {
     output tl : int
     output gate_closed : bool
     output duration : int
+    output operate : int
 	
 	clock timer : int
 	
-	open -> open :: wl <= tl ==> true
-	open -> Closing :: wl > tl ==> true #timer
-	Closing -> Closing :: ! gate_closed ==> timer < duration
+	open -> open :: wl <= tl ==> ! operate
+	open -> Closing :: wl > tl ==> operate #timer
+	Closing -> Closing :: ! gate_closed & timer < duration ==> true
 	Closing -> Closed :: gate_closed ==> true
-	Closed -> Closed :: wl >= tl ==> true
-	Closed -> Opening :: wl < tl ==> true #timer
-	Opening -> Opening :: gate_closed ==> timer < duration
+	Closed -> Closed :: wl > tl ==> ! operate
+	Closed -> Opening :: wl <= tl ==> operate #timer
+	Opening -> Opening :: gate_closed & timer < duration ==> true
 	Opening -> open :: ! gate_closed ==> true
 }
 
@@ -23,6 +24,7 @@ contract SafeEcsSkip {
     output tl : int
     output gate_closed : bool
     output duration : int
+    output operate : int
 	
 	clock timer : int
 	
@@ -62,6 +64,7 @@ reactor Ecs  {
     output tl : int
     output duration : int
     output gate_closed : bool
+    output operate : bool
 	
 	output target_lvl : int
 	
@@ -84,6 +87,7 @@ reactor Ecs  {
 		if(wl > target_lvl)--wl;
 		else ++wl;
 		
+		operate = (gate_closed != (wl > tl));
 		gate_closed = wl > tl;
     =}
 }
@@ -94,6 +98,7 @@ reactor FluctuateEcs  {
     output tl : int
     output duration : int
     output gate_closed : bool
+    output operate : bool
 	
     contract SafeEcs[wl <- wl]
     contract SafeEcsSkip[wl <- wl]
@@ -104,6 +109,7 @@ reactor FluctuateEcs  {
 		tl = 50;
 		duration = 15;
 		wl += (chw % 10) - 4 - (wl > tl);
+		operate = (gate_closed != (wl > tl));
 		gate_closed = wl > tl;
     =}
 }
@@ -119,6 +125,7 @@ reactor DelayEcs  {
     output gate_closed_next_1 : bool
     output gate_closed_next_2 : bool
 	output target_lvl : int
+    output operate : bool
 	
     contract SafeEcs[wl <- wl]
     contract SafeEcsSkip[wl <- wl]
@@ -138,6 +145,7 @@ reactor DelayEcs  {
 		if(wl > target_lvl)--wl;
 		else ++wl;
 		
+		operate = (gate_closed != (wl > tl)) || (gate_closed_next_1 != (wl > tl)) || (gate_closed_next_2 != (wl > tl));
 		gate_closed = gate_closed_next_1;
 		gate_closed_next_1 = gate_closed_next_2;
 		gate_closed_next_2 = wl > tl;
