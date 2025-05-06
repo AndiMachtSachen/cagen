@@ -1,23 +1,50 @@
 contract Interval {
     output y : int
-    a -> a :: TRUE ==> -0sd32_128 <= y & y <= 0sd32_128
+    a -> a :: TRUE ==> -0sd32_10 <= y & y <= 0sd32_10
 }
 
 contract UpDown {
     input  tick : bool
     output cnt  : int
-
+    
+	clock timer : int
+	
     history cnt(1)
+    history timer(3)
 
-    uP -> uP ::  tick ==> -0sd32_128 < cnt & h_cnt_1 < cnt & cnt < 0sd32_128
+    uP -> uP ::  t_e < 1020 & tick ==> -0sd32_10 < cnt & h_cnt_1 < cnt & cnt < 0sd32_10
     uP -> uP :: ! tick ==> h_cnt_1 = cnt
 
-    DOWN -> DOWN ::  tick ==> h_cnt_1 > cnt & cnt > -0sd32_128
+    DOWN -> DOWN ::  tick ==> h_cnt_1 > cnt & cnt > -0sd32_10
     DOWN -> DOWN :: ! tick ==> h_cnt_1 = cnt
 
-    uP -> DOWN :: tick ==> cnt = 0sd32_128
-    DOWN -> uP :: tick ==> cnt =-0sd32_128
-
+    uP -> DOWN :: t_e < 1020 & tick | timer_e = 0 ==> cnt = 0sd32_10 # timer
+    DOWN -> uP :: tick ==> cnt =-0sd32_10 # timer
+	
+	uP -> COUNT_TWO :: cnt = 2 ==> t_s < 100 #timer
+	
+	uP -> ZERO :: t_e = 0 ==> true
+	
+	uP -> MIN_E :: t_e < 10 ==> true
+	uP -> MIN_S :: t_s < 10 ==> true
+	uP -> MIN :: t < 10 ==> true
+	
+	uP -> H1_TIMER_E_0 :: h_timer_e_1 = 0 ==> true
+	uP -> H2_TIMER_E_0 :: h_timer_e_2 = 0 ==> true
+	uP -> H2_TIMER_S_0 :: h_timer_s_2 = 0 ==> true
+	uP -> H3_TIMER_E_0 :: h_timer_e_3 = 0 ==> true
+	
+	uP -> H0_TIMER_S_50 :: timer_s = 50 ==> true
+	uP -> H1_TIMER_S_50 :: h_timer_s_1 = 50 ==> true
+	uP -> H2_TIMER_S_50 :: h_timer_s_2 = 50 ==> true
+	uP -> H3_TIMER_S_50 :: h_timer_s_3 = 50 ==> true
+	
+	DOWN -> H0_TIMER_S_50 :: timer_s = 50 ==> true
+	DOWN -> H1_TIMER_S_50 :: h_timer_s_1 = 50 ==> true
+	DOWN -> H2_TIMER_S_50 :: h_timer_s_2 = 50 ==> true
+	DOWN -> H3_TIMER_S_50 :: h_timer_s_3 = 50 ==> true
+	
+	
     contract Interval[y <- cnt]
 }
 
@@ -31,14 +58,15 @@ reactor Counter  {
 
     {=
         if(tick) {
-        if(!down) {
-            val += 1;
-        } else {
-            val -= 1;
-        }
+			if(!down) {
+				val += 1;
+			} else {
+				val -= 1;
+			}
 
-        if(val == 128 || val == -128) down = !down;
+			if(val == 10 || val == -10) down = !down;
         }
+		std::this_thread::sleep_for(std::chrono::milliseconds(std::rand() % 50));
     =}
 }
 
@@ -53,6 +81,10 @@ reactor CounterBroken  {
     {=
         if(!down) val += 1;
         else      val -= 1;
-        if(val == 128 || val == -128) down = !down;
+        if(val == 10 || val == -10) down = !down;
     =}
 }
+
+
+
+

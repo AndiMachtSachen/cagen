@@ -1,0 +1,148 @@
+
+contract Alarm {
+    output HW : bool
+	output DW : bool
+	output DG : bool
+	output P : bool
+	output A : bool
+	
+	output d : int
+	
+	clock tA : int
+	
+	ok -> ok :: !DW & !DG ==> tA < d | !A
+	ok -> Alarm :: DW | DG ==> t_s < d # tA
+	Alarm -> Alarm :: DW | DG | tA < 5000 ==> A
+	Alarm -> ok :: !DW & !DG & tA > 5000 ==> true # tA
+}
+
+
+contract Pump {
+    output HW : bool
+	output DW : bool
+	output DG : bool
+	output P : bool
+	output A : bool
+	
+	output d : int
+	
+	clock tP : int
+	
+    history P(1)
+	
+	pumpOn -> pumpOn :: HW & !DG ==> P | (tP < d & ! h_P_1)
+	pumpOn -> pumpOff :: !HW | DG ==> true # tP
+	pumpOff -> pumpOff :: !HW | DG ==> !P | (tP < d & h_P_1)
+	pumpOff -> pumpOn :: HW & !DG ==> true # tP
+
+}
+
+
+contract Water {
+    output HW : bool
+	output DW : bool
+	output DG : bool
+	output P : bool
+	output A : bool
+	
+	output w : int
+	
+	clock tW : int
+	
+	low -> low :: !HW & !DW ==> true # tW
+	low -> high :: HW & !DW ==> true
+	high -> high :: HW & !DW ==> true
+	high -> danger :: HW & DW & tW >= w ==> true
+	danger -> danger :: HW & DW ==> true
+	danger -> high :: HW & !DW ==> true
+	high -> low :: !HW & !DW ==> true # tW
+	
+}
+
+
+contract Drain {
+    output HW : bool
+	output DW : bool
+	output DG : bool
+	output P : bool
+	output A : bool
+	
+	output e : int
+	
+	clock tD : int
+	
+	d -> d :: P & (tD < e | !HW) ==> true
+	d -> d :: !P ==> true # tD
+
+}
+
+
+contract Gas {
+    output HW : bool
+	output DW : bool
+	output DG : bool
+	output P : bool
+	output A : bool
+	
+	output g : int
+	output kappa : int
+	
+	clock tG : int
+	
+	ng -> ng :: !DG ==> true
+	ng -> dg :: DG & tG > g ==> true # tG
+	dg -> dg :: DG & tG <= kappa ==> true
+	dg -> ng :: !DG & tG <= kappa ==> true
+
+}
+
+
+reactor MinePump  {
+	
+    output HW : bool
+	output DW : bool
+	output DG : bool
+	output P : bool
+	output A : bool
+	
+	output d : int
+	output e : int
+	output g : int
+	output kappa : int
+	output w : int
+	
+	output wl : int
+	
+    contract Alarm[]
+    contract Pump[]
+    contract Water[]
+    contract Drain[]
+    contract Gas[]
+
+    {=
+		std::this_thread::sleep_for(std::chrono::milliseconds(std::rand()%5));
+		
+		
+		d = 50;
+		e = 20;
+		g = 10;
+		kappa = 10;
+		w = 10;
+		
+		if(wl > 0 && ( P || std::rand() % 2)) {
+			wl--;
+		}else if(wl < 5 && std::rand() % 2) {
+			wl++;
+		}
+		HW = wl >= 2;
+		DW = wl >= 4;
+		DG = (std::rand()%100 == 0);
+		
+		P = HW && ! DG;
+		if(A) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+		}
+		A = DW || DG;
+		
+    =}
+}

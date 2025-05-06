@@ -1,5 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
+#define TRUE true
+#define FALSE false
 
 #ifdef SEAHORN
 #include "seahorn/seahorn.h"
@@ -12,7 +14,7 @@ bool nondet_int() {int i;return i;}
 
 
 
-
+null
 bool tick;
 int cnt;
 bool uP;
@@ -26,28 +28,28 @@ int h_cnt_1;
                 
 uP = true;
 DOWN = false;
-h_cnt_1 = 0;
+h_cnt_1 = ;
 }
 void next_UpDown() {
 h_cnt_1 = h_cnt_0;
 h_cnt_0 = cnt;
-bool pre_contract_trans_uP_uP_1 =  tick;
-bool post_contract_trans_uP_uP_1 = -128 < cnt && h_cnt_1 < cnt && cnt < 128;
+bool pre_contract_trans_uP_uP_1 = tick;
+bool post_contract_trans_uP_uP_1 = (((-128 < cnt) && (h_cnt_1 < cnt)) && (cnt < 128));
 bool contract_trans_uP_uP_1 = pre_contract_trans_uP_uP_1 && post_contract_trans_uP_uP_1;
-bool pre_contract_trans_uP_uP_2 = ! tick;
-bool post_contract_trans_uP_uP_2 = h_cnt_1 == cnt;
+bool pre_contract_trans_uP_uP_2 = !tick;
+bool post_contract_trans_uP_uP_2 = (h_cnt_1 == cnt);
 bool contract_trans_uP_uP_2 = pre_contract_trans_uP_uP_2 && post_contract_trans_uP_uP_2;
-bool pre_contract_trans_DOWN_DOWN_3 =  tick;
-bool post_contract_trans_DOWN_DOWN_3 = h_cnt_1 > cnt && cnt > -128;
+bool pre_contract_trans_DOWN_DOWN_3 = tick;
+bool post_contract_trans_DOWN_DOWN_3 = ((h_cnt_1 > cnt) && (cnt > -128));
 bool contract_trans_DOWN_DOWN_3 = pre_contract_trans_DOWN_DOWN_3 && post_contract_trans_DOWN_DOWN_3;
-bool pre_contract_trans_DOWN_DOWN_4 = ! tick;
-bool post_contract_trans_DOWN_DOWN_4 = h_cnt_1 == cnt;
+bool pre_contract_trans_DOWN_DOWN_4 = !tick;
+bool post_contract_trans_DOWN_DOWN_4 = (h_cnt_1 == cnt);
 bool contract_trans_DOWN_DOWN_4 = pre_contract_trans_DOWN_DOWN_4 && post_contract_trans_DOWN_DOWN_4;
 bool pre_contract_trans_uP_DOWN_5 = tick;
-bool post_contract_trans_uP_DOWN_5 = cnt == 128;
+bool post_contract_trans_uP_DOWN_5 = (cnt == 128);
 bool contract_trans_uP_DOWN_5 = pre_contract_trans_uP_DOWN_5 && post_contract_trans_uP_DOWN_5;
 bool pre_contract_trans_DOWN_uP_6 = tick;
-bool post_contract_trans_DOWN_uP_6 = cnt ==-128;
+bool post_contract_trans_DOWN_uP_6 = (cnt == -128);
 bool contract_trans_DOWN_uP_6 = pre_contract_trans_DOWN_uP_6 && post_contract_trans_DOWN_uP_6;
 bool t_12 = uP && contract_trans_uP_uP_1;
 bool t_13 = uP && contract_trans_uP_uP_2;
@@ -67,9 +69,6 @@ bool sys_tick;
 int sys_val;
 bool sys_down;
 void init_sys_CounterBroken() {
-sys_tick = 0;
-sys_val = 0;
-sys_down = 0;
 }
 void next_sys_CounterBroken() {
 bool tick = sys_tick;

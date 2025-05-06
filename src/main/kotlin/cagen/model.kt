@@ -47,6 +47,7 @@ data class Signature(
     val inputs: MutableList<Variable> = arrayListOf(),
     val outputs: MutableList<Variable> = arrayListOf(),
     val internals: MutableList<Variable> = arrayListOf(),
+    val clocks : MutableList<Variable> = arrayListOf()
 ) {
     fun get(name: String) = all.find { it.name == name }
     fun accessible(name: String) = (inputs + outputs).find { it.name == name }
@@ -63,7 +64,8 @@ data class Signature(
     operator fun plus(signature: Signature): Signature = Signature(
         (inputs + signature.inputs).toMutableList(),
         (outputs + signature.outputs).toMutableList(),
-        (internals + signature.internals).toMutableList()
+        (internals + signature.internals).toMutableList(),
+        (clocks + signature.clocks).toMutableList()
     )
 }
 
@@ -146,7 +148,8 @@ private operator fun Iterable<CATransition>.times(transitions: Iterable<CATransi
             CATransition(
                 "${t.name}_${s.name}", "${t.from}_${s.from}", "${t.to}_${s.to}",
                 t.vvGuard and s.vvGuard,
-                contract
+                contract,
+                (t.clocks + s.clocks).toMutableList()
             )
         }
     }
@@ -165,7 +168,8 @@ data class CATransition(
     val name: String,
     val from: String, val to: String,
     val vvGuard: VVGuard,
-    val contract: PrePost
+    val contract: PrePost,
+    val clocks: MutableList<String> = arrayListOf()
 )
 
 private fun toporderSystem(

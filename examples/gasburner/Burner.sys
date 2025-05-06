@@ -1,0 +1,60 @@
+
+contract SafeBurner {
+    input leak : bool
+    
+	clock timer : int
+	
+    Leaking -> Leaking :: leak ==> timer < 10
+	Leaking -> not_Leaking :: ! leak ==> timer < 10 # timer
+	not_Leaking -> not_Leaking :: ! leak ==> true
+	not_Leaking -> Leaking :: leak ==> timer >= 30 # timer
+	
+}
+
+
+contract LenientBurner {
+    input leak : bool
+    
+	clock timer : int
+	
+    Leaking -> Leaking :: leak ==> timer < 50
+	Leaking -> not_Leaking :: ! leak ==> timer < 50 # timer
+	not_Leaking -> not_Leaking :: ! leak ==> true
+	not_Leaking -> Leaking :: leak ==> timer >= 30 # timer
+	
+}
+
+reactor Burner  {
+    state leak : bool
+    output steps : int
+    contract SafeBurner[leak <- leak]
+    contract LenientBurner[leak <- leak]
+
+    {=
+		
+		if(!leak) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(std::rand() % 10));
+        }
+		steps += 1;
+		if(steps > 5) {
+			leak = !leak;
+			steps = 0;
+		}
+    =}
+}
+
+
+reactor DirectBurner {
+    state leak : bool
+    contract SafeBurner[leak <- leak]
+    contract LenientBurner[leak <- leak]
+
+    {=
+		if(!leak) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+		if(std::rand() <= std::rand()) {
+			leak = !leak;
+		}
+    =}
+}

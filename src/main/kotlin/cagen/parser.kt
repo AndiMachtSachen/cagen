@@ -210,6 +210,7 @@ class Translator : SystemDefBaseVisitor<Unit>() {
             val list = when {
                 context.INPUT() != null -> sig.inputs
                 context.OUTPUT() != null -> sig.outputs
+                context.CLOCK() != null -> sig.clocks
                 else -> sig.internals
             }
             for (varctx in context.variable()) {
@@ -268,7 +269,7 @@ class Translator : SystemDefBaseVisitor<Unit>() {
                     "contract_trans_${it.from.text}_${it.to.text}_${PrePost.counter.getAndIncrement()}"
                 )
             contract ?: error("Could not find contract ${it.contr.text}")
-            CATransition("t_${it.start.line}", it.from.text, it.to.text, vvGuard, contract)
+            CATransition("t_${it.start.line}", it.from.text, it.to.text, vvGuard, contract, it.clocks.map { it.text }.toMutableList())
         }
         model.contracts.add(
             Contract(ctx.name.text, parseIo(ctx.io()), parseHistory(ctx.history()), transitions)

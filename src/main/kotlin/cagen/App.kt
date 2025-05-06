@@ -3,7 +3,7 @@
 package cagen
 
 import cagen.Util.infoln
-import cagen.code.CCodeUtils
+import cagen.code.*
 import cagen.draw.Dot
 import cagen.draw.TikzPrinter
 import com.github.ajalt.clikt.core.*
@@ -208,7 +208,7 @@ class Verify : CliktCommand() {
     val context by requireObject<AppContext>()
 
     override fun run() {
-        val model = context.load(inputFile)
+        val model: Model = context.load(inputFile)
         val pos = createProofObligations(model)
         infoln("Proof Obligation found:")
         for (po in pos) {
@@ -228,7 +228,54 @@ class Verify : CliktCommand() {
     }
 }
 
+class Rca : CliktCommand() {
+    val outputFolder by option("-o", "--output").file().default(File("rca_output"))
+    val inputFile by argument("SYSTEM")
+        .file(mustExist = true, canBeDir = false, mustBeReadable = true)
+    val context by requireObject<AppContext>()
+
+    override fun run() {
+        val (systems) = context.load(inputFile)
+        systems.forEach{ sys ->
+            val teName = envClockName(tClockName)
+            val tsName = sysClockName(tClockName)
+
+            if(sys.signature.outputs.none{ v -> v.name == teName}){
+                sys.signature.outputs.addLast(Variable(teName, BuiltInType("int")))
+            }
+            if(sys.signature.outputs.none{ v -> v.name == tsName}){
+                sys.signature.outputs.addLast(Variable(tsName, BuiltInType("int")))
+            }
+            sys.contracts.forEach{ c ->
+                if(c.contract.signature.clocks.none{ v -> v.name == "t"}){
+                    c.contract.signature.clocks.addLast(Variable("t", BuiltInType("int")))
+                }
+                c.contract.transitions.forEach {
+                    if(!it.clocks.contains("t")) {
+                        it.clocks.addLast("t")
+                    }
+                }
+                c.contract.signature.clocks.toList().forEach {x ->
+                    if(x.name.endsWith(envClockNameSuffix) || x.name.endsWith(sysClockNameSuffix))return@forEach;
+                    val x_e = envClockName(x.name)
+                    val x_s = sysClockName(x.name)
+
+                    if(c.contract.signature.clocks.none{ v -> v.name == x_e}){
+                        c.contract.signature.clocks.addLast(Variable(x_e, BuiltInType("int")))
+                    }
+                    if(c.contract.signature.clocks.none{ v -> v.name == x_s}){
+                        c.contract.signature.clocks.addLast(Variable(x_s, BuiltInType("int")))
+                    }
+                }
+                CppGen.writeRuntimeMonitor(c, outputFolder.toPath())
+            }
+            CppGen.writeSystemTu(sys, outputFolder.toPath())
+            CppGen.writeSystemHeader(sys, outputFolder.toPath())
+            CppGen.writeEnvironmentHeader(sys, outputFolder.toPath())
+        }
+    }
+}
 
 fun main(args: Array<String>) = Tool()
-    .subcommands(ExtractCode(), DotCommand(), TikzCommand(), Verify(), ConstructCA(), VVSlice())
+    .subcommands(ExtractCode(), DotCommand(), TikzCommand(), Verify(), ConstructCA(), VVSlice(), Rca())
     .main(args)
