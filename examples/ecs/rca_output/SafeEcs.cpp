@@ -78,14 +78,14 @@ void SafeEcsMonitor::update() {
                 try{
                 Q_Value pre_cond = (wl <= tl);
                 #ifdef FUZZY
-                pre_cond = tok.q_assume && pre_cond;
+                pre_cond = q_combine(tok.q_assume, pre_cond);
                 #endif
                 if(pre_cond) {
                     any_pre = true;
                     try{
                     Q_Value post_cond = !operate;
                     #ifdef FUZZY
-                    post_cond = tok.q_guarantee && post_cond;
+                    post_cond = q_combine(tok.q_guarantee, post_cond);
                     #endif
                     if(post_cond) {
                         auto new_clock_traces = tok.clock_traces;
@@ -127,14 +127,14 @@ void SafeEcsMonitor::update() {
                 try{
                 Q_Value pre_cond = (wl > tl);
                 #ifdef FUZZY
-                pre_cond = tok.q_assume && pre_cond;
+                pre_cond = q_combine(tok.q_assume, pre_cond);
                 #endif
                 if(pre_cond) {
                     any_pre = true;
                     try{
                     Q_Value post_cond = operate;
                     #ifdef FUZZY
-                    post_cond = tok.q_guarantee && post_cond;
+                    post_cond = q_combine(tok.q_guarantee, post_cond);
                     #endif
                     if(post_cond) {
                         auto new_clock_traces = tok.clock_traces;
@@ -182,14 +182,14 @@ void SafeEcsMonitor::update() {
                 try{
                 Q_Value pre_cond = (!gate_closed && (timer < duration));
                 #ifdef FUZZY
-                pre_cond = tok.q_assume && pre_cond;
+                pre_cond = q_combine(tok.q_assume, pre_cond);
                 #endif
                 if(pre_cond) {
                     any_pre = true;
                     try{
                     Q_Value post_cond = true;
                     #ifdef FUZZY
-                    post_cond = tok.q_guarantee && post_cond;
+                    post_cond = q_combine(tok.q_guarantee, post_cond);
                     #endif
                     if(post_cond) {
                         auto new_clock_traces = tok.clock_traces;
@@ -231,14 +231,14 @@ void SafeEcsMonitor::update() {
                 try{
                 Q_Value pre_cond = gate_closed;
                 #ifdef FUZZY
-                pre_cond = tok.q_assume && pre_cond;
+                pre_cond = q_combine(tok.q_assume, pre_cond);
                 #endif
                 if(pre_cond) {
                     any_pre = true;
                     try{
                     Q_Value post_cond = true;
                     #ifdef FUZZY
-                    post_cond = tok.q_guarantee && post_cond;
+                    post_cond = q_combine(tok.q_guarantee, post_cond);
                     #endif
                     if(post_cond) {
                         auto new_clock_traces = tok.clock_traces;
@@ -284,14 +284,14 @@ void SafeEcsMonitor::update() {
                 try{
                 Q_Value pre_cond = (wl > tl);
                 #ifdef FUZZY
-                pre_cond = tok.q_assume && pre_cond;
+                pre_cond = q_combine(tok.q_assume, pre_cond);
                 #endif
                 if(pre_cond) {
                     any_pre = true;
                     try{
                     Q_Value post_cond = !operate;
                     #ifdef FUZZY
-                    post_cond = tok.q_guarantee && post_cond;
+                    post_cond = q_combine(tok.q_guarantee, post_cond);
                     #endif
                     if(post_cond) {
                         auto new_clock_traces = tok.clock_traces;
@@ -333,14 +333,14 @@ void SafeEcsMonitor::update() {
                 try{
                 Q_Value pre_cond = (wl <= tl);
                 #ifdef FUZZY
-                pre_cond = tok.q_assume && pre_cond;
+                pre_cond = q_combine(tok.q_assume, pre_cond);
                 #endif
                 if(pre_cond) {
                     any_pre = true;
                     try{
                     Q_Value post_cond = operate;
                     #ifdef FUZZY
-                    post_cond = tok.q_guarantee && post_cond;
+                    post_cond = q_combine(tok.q_guarantee, post_cond);
                     #endif
                     if(post_cond) {
                         auto new_clock_traces = tok.clock_traces;
@@ -388,14 +388,14 @@ void SafeEcsMonitor::update() {
                 try{
                 Q_Value pre_cond = (gate_closed && (timer < duration));
                 #ifdef FUZZY
-                pre_cond = tok.q_assume && pre_cond;
+                pre_cond = q_combine(tok.q_assume, pre_cond);
                 #endif
                 if(pre_cond) {
                     any_pre = true;
                     try{
                     Q_Value post_cond = true;
                     #ifdef FUZZY
-                    post_cond = tok.q_guarantee && post_cond;
+                    post_cond = q_combine(tok.q_guarantee, post_cond);
                     #endif
                     if(post_cond) {
                         auto new_clock_traces = tok.clock_traces;
@@ -437,14 +437,14 @@ void SafeEcsMonitor::update() {
                 try{
                 Q_Value pre_cond = !gate_closed;
                 #ifdef FUZZY
-                pre_cond = tok.q_assume && pre_cond;
+                pre_cond = q_combine(tok.q_assume, pre_cond);
                 #endif
                 if(pre_cond) {
                     any_pre = true;
                     try{
                     Q_Value post_cond = true;
                     #ifdef FUZZY
-                    post_cond = tok.q_guarantee && post_cond;
+                    post_cond = q_combine(tok.q_guarantee, post_cond);
                     #endif
                     if(post_cond) {
                         auto new_clock_traces = tok.clock_traces;

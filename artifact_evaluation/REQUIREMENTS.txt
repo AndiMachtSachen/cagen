@@ -1,0 +1,11 @@
+tested on x86_64 linux:
+
+c++ compiler clang++
+clang version 20.1.8 (Fedora 20.1.8-4.fc42)
+
+kotlin compilation:
+openjdk version "23.0.2" 2025-01-21
+OpenJDK Runtime Environment GraalVM CE 23.0.2+7.1 (build 23.0.2+7-jvmci-b01)
+OpenJDK 64-Bit Server VM GraalVM CE 23.0.2+7.1 (build 23.0.2+7-jvmci-b01, mixed mode, sharing)
+(gradle included in repository)
+

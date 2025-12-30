@@ -1,20 +1,20 @@
-#include "NonDetEcs.hpp"
+#include "EcsOperate.hpp"
 
-std::ostream& operator<<(std::ostream& out, NonDetEcsMode v) {
+std::ostream& operator<<(std::ostream& out, EcsOperateMode v) {
     switch(v) {
         
-        case NonDetEcsMode::open:
+        case EcsOperateMode::open:
             return out << "open"; 
-        case NonDetEcsMode::Closing:
+        case EcsOperateMode::Closing:
             return out << "Closing"; 
-        case NonDetEcsMode::closed:
+        case EcsOperateMode::closed:
             return out << "closed"; 
-        case NonDetEcsMode::Opening:
+        case EcsOperateMode::Opening:
             return out << "Opening"; 
     }
 }
 
-void NonDetEcsMonitor::advance(int t_e, int t_s) {
+void EcsOperateMonitor::advance(int t_e, int t_s) {
     std::cout << "Advance monitor by t_e = "<<t_e<<", t_s = "<<t_s<<std::endl;
     #if(DEDUPLICATE_TOKENS)
     ToksT next_toks;
@@ -38,7 +38,7 @@ void NonDetEcsMonitor::advance(int t_e, int t_s) {
     #endif
 }
 
-void NonDetEcsMonitor::update() {
+void EcsOperateMonitor::update() {
     postcondition_accessed_incorrect_time = false;
     precondition_accessed_incorrect_time = false;
     
@@ -74,7 +74,7 @@ void NonDetEcsMonitor::update() {
         
         #endif
         switch(tok.mode) {
-            case NonDetEcsMode::open: {
+            case EcsOperateMode::open: {
                 try{
                 Q_Value pre_cond = (wl <= tl);
                 #ifdef FUZZY
@@ -83,7 +83,7 @@ void NonDetEcsMonitor::update() {
                 if(pre_cond) {
                     any_pre = true;
                     try{
-                    Q_Value post_cond = true;
+                    Q_Value post_cond = !operate;
                     #ifdef FUZZY
                     post_cond = q_combine(tok.q_guarantee, post_cond);
                     #endif
@@ -106,9 +106,9 @@ void NonDetEcsMonitor::update() {
                         new_clock_traces.t_trace.back().reset();
                         
                         #ifdef FUZZY
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::open, std::move(new_clock_traces), pre_cond, post_cond};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::open, std::move(new_clock_traces), pre_cond, post_cond};
                         #else
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::open, std::move(new_clock_traces)};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::open, std::move(new_clock_traces)};
                         #endif
                         
                         #if(DEDUPLICATE_TOKENS)
@@ -125,14 +125,14 @@ void NonDetEcsMonitor::update() {
                     precondition_accessed_incorrect_time = true;
                 }
                 try{
-                Q_Value pre_cond = (wl >= tl);
+                Q_Value pre_cond = (wl > tl);
                 #ifdef FUZZY
                 pre_cond = q_combine(tok.q_assume, pre_cond);
                 #endif
                 if(pre_cond) {
                     any_pre = true;
                     try{
-                    Q_Value post_cond = true;
+                    Q_Value post_cond = operate;
                     #ifdef FUZZY
                     post_cond = q_combine(tok.q_guarantee, post_cond);
                     #endif
@@ -157,9 +157,9 @@ void NonDetEcsMonitor::update() {
                         new_clock_traces.t_trace.back().reset();
                         
                         #ifdef FUZZY
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::Closing, std::move(new_clock_traces), pre_cond, post_cond};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::Closing, std::move(new_clock_traces), pre_cond, post_cond};
                         #else
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::Closing, std::move(new_clock_traces)};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::Closing, std::move(new_clock_traces)};
                         #endif
                         
                         #if(DEDUPLICATE_TOKENS)
@@ -178,16 +178,16 @@ void NonDetEcsMonitor::update() {
                 break;
             };
             
-            case NonDetEcsMode::Closing: {
+            case EcsOperateMode::Closing: {
                 try{
-                Q_Value pre_cond = !gate_closed;
+                Q_Value pre_cond = (!gate_closed && (timer < duration));
                 #ifdef FUZZY
                 pre_cond = q_combine(tok.q_assume, pre_cond);
                 #endif
                 if(pre_cond) {
                     any_pre = true;
                     try{
-                    Q_Value post_cond = (timer < duration);
+                    Q_Value post_cond = true;
                     #ifdef FUZZY
                     post_cond = q_combine(tok.q_guarantee, post_cond);
                     #endif
@@ -210,9 +210,9 @@ void NonDetEcsMonitor::update() {
                         new_clock_traces.t_trace.back().reset();
                         
                         #ifdef FUZZY
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::Closing, std::move(new_clock_traces), pre_cond, post_cond};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::Closing, std::move(new_clock_traces), pre_cond, post_cond};
                         #else
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::Closing, std::move(new_clock_traces)};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::Closing, std::move(new_clock_traces)};
                         #endif
                         
                         #if(DEDUPLICATE_TOKENS)
@@ -259,9 +259,9 @@ void NonDetEcsMonitor::update() {
                         new_clock_traces.t_trace.back().reset();
                         
                         #ifdef FUZZY
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::closed, std::move(new_clock_traces), pre_cond, post_cond};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::closed, std::move(new_clock_traces), pre_cond, post_cond};
                         #else
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::closed, std::move(new_clock_traces)};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::closed, std::move(new_clock_traces)};
                         #endif
                         
                         #if(DEDUPLICATE_TOKENS)
@@ -280,16 +280,16 @@ void NonDetEcsMonitor::update() {
                 break;
             };
             
-            case NonDetEcsMode::closed: {
+            case EcsOperateMode::closed: {
                 try{
-                Q_Value pre_cond = (wl >= tl);
+                Q_Value pre_cond = (wl > tl);
                 #ifdef FUZZY
                 pre_cond = q_combine(tok.q_assume, pre_cond);
                 #endif
                 if(pre_cond) {
                     any_pre = true;
                     try{
-                    Q_Value post_cond = true;
+                    Q_Value post_cond = !operate;
                     #ifdef FUZZY
                     post_cond = q_combine(tok.q_guarantee, post_cond);
                     #endif
@@ -312,9 +312,9 @@ void NonDetEcsMonitor::update() {
                         new_clock_traces.t_trace.back().reset();
                         
                         #ifdef FUZZY
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::closed, std::move(new_clock_traces), pre_cond, post_cond};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::closed, std::move(new_clock_traces), pre_cond, post_cond};
                         #else
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::closed, std::move(new_clock_traces)};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::closed, std::move(new_clock_traces)};
                         #endif
                         
                         #if(DEDUPLICATE_TOKENS)
@@ -338,7 +338,7 @@ void NonDetEcsMonitor::update() {
                 if(pre_cond) {
                     any_pre = true;
                     try{
-                    Q_Value post_cond = true;
+                    Q_Value post_cond = operate;
                     #ifdef FUZZY
                     post_cond = q_combine(tok.q_guarantee, post_cond);
                     #endif
@@ -363,9 +363,9 @@ void NonDetEcsMonitor::update() {
                         new_clock_traces.t_trace.back().reset();
                         
                         #ifdef FUZZY
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::Opening, std::move(new_clock_traces), pre_cond, post_cond};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::Opening, std::move(new_clock_traces), pre_cond, post_cond};
                         #else
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::Opening, std::move(new_clock_traces)};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::Opening, std::move(new_clock_traces)};
                         #endif
                         
                         #if(DEDUPLICATE_TOKENS)
@@ -384,16 +384,16 @@ void NonDetEcsMonitor::update() {
                 break;
             };
             
-            case NonDetEcsMode::Opening: {
+            case EcsOperateMode::Opening: {
                 try{
-                Q_Value pre_cond = gate_closed;
+                Q_Value pre_cond = (gate_closed && (timer < duration));
                 #ifdef FUZZY
                 pre_cond = q_combine(tok.q_assume, pre_cond);
                 #endif
                 if(pre_cond) {
                     any_pre = true;
                     try{
-                    Q_Value post_cond = (timer < duration);
+                    Q_Value post_cond = true;
                     #ifdef FUZZY
                     post_cond = q_combine(tok.q_guarantee, post_cond);
                     #endif
@@ -416,9 +416,9 @@ void NonDetEcsMonitor::update() {
                         new_clock_traces.t_trace.back().reset();
                         
                         #ifdef FUZZY
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::Opening, std::move(new_clock_traces), pre_cond, post_cond};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::Opening, std::move(new_clock_traces), pre_cond, post_cond};
                         #else
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::Opening, std::move(new_clock_traces)};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::Opening, std::move(new_clock_traces)};
                         #endif
                         
                         #if(DEDUPLICATE_TOKENS)
@@ -465,9 +465,9 @@ void NonDetEcsMonitor::update() {
                         new_clock_traces.t_trace.back().reset();
                         
                         #ifdef FUZZY
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::open, std::move(new_clock_traces), pre_cond, post_cond};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::open, std::move(new_clock_traces), pre_cond, post_cond};
                         #else
-                        auto new_tok = NonDetEcsTok{NonDetEcsMode::open, std::move(new_clock_traces)};
+                        auto new_tok = EcsOperateTok{EcsOperateMode::open, std::move(new_clock_traces)};
                         #endif
                         
                         #if(DEDUPLICATE_TOKENS)
@@ -501,9 +501,9 @@ void NonDetEcsMonitor::update() {
     }
 }
 
-std::ostream& operator<<(std::ostream& out, NonDetEcsMonitor const& monitor) {
+std::ostream& operator<<(std::ostream& out, EcsOperateMonitor const& monitor) {
     //inputs
-    out << "NonDetEcsMonitor\n";
+    out << "EcsOperateMonitor\n";
     
     
     //outputs
@@ -511,6 +511,7 @@ std::ostream& operator<<(std::ostream& out, NonDetEcsMonitor const& monitor) {
     out << " tl = " << monitor.tl << ',';
     out << " gate_closed = " << monitor.gate_closed << ',';
     out << " duration = " << monitor.duration << ',';
+    out << " operate = " << monitor.operate << ',';
     out << '\n';
     //internals
     
@@ -536,7 +537,7 @@ std::ostream& operator<<(std::ostream& out, NonDetEcsMonitor const& monitor) {
     return out;
 }
 
-bool NonDetEcsMonitor::should_stop() const {
+bool EcsOperateMonitor::should_stop() const {
     #if(STOP_ON_EMPTY)
     if(tokens.empty()){
         return true;

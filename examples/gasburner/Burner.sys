@@ -20,7 +20,38 @@ contract LenientBurner {
     Leaking -> Leaking :: leak ==> timer < 50
 	Leaking -> not_Leaking :: ! leak ==> timer < 50 # timer
 	not_Leaking -> not_Leaking :: ! leak ==> true
-	not_Leaking -> Leaking :: leak ==> timer >= 30 # timer
+	not_Leaking -> Leaking :: leak ==> timer >= 20 # timer
+	
+}
+
+
+contract BurnerControllerEvent {
+    input leak : bool
+    output shutoff : bool
+    
+	clock timer : int
+	
+	runnable -> runnable :: ! leak ==> ! shutoff # timer
+	runnable -> Unsafe :: leak & timer <= 10 ==> shutoff # timer
+	Unsafe -> Unsafe :: leak ==> shutoff # timer
+	Unsafe -> runnable :: ! leak & timer >= 30 ==> ! shutoff # timer
+	
+}
+
+
+contract BurnerControllerSample {
+    input leak : bool
+    
+    output shutoff : bool
+    
+	clock timer : int
+	
+	runnable -> runnable :: ! leak ==> true # timer
+	runnable -> runnable :: leak ==> timer <= 10
+	runnable -> Unsafe :: leak ==> shutoff # timer
+	Unsafe -> Unsafe :: leak ==> shutoff # timer
+	Unsafe -> Unsafe :: ! leak ==> shutoff
+	Unsafe -> runnable :: ! leak ==> ! shutoff & timer >= 30 # timer
 	
 }
 
@@ -40,6 +71,32 @@ reactor Burner  {
 			leak = !leak;
 			steps = 0;
 		}
+    =}
+}
+
+reactor BurnerController  {
+    state leak : bool
+    output steps : int
+    output operate : bool
+    output shutoff : bool
+    contract SafeBurner[leak <- leak]
+    contract LenientBurner[leak <- leak]
+    contract BurnerControllerEvent[leak <- leak]
+    contract BurnerControllerSample[leak <- leak]
+
+    {=
+		operate = false;
+		if(!leak) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(std::rand() % 10));
+			operate = true;
+        }
+		steps += 1;
+		if(steps > 5) {
+			leak = !leak;
+			steps = 0;
+			operate = false;
+		}
+		shutoff = !operate;
     =}
 }
 
