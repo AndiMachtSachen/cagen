@@ -26,13 +26,14 @@ We have implemented support to Booleans and Integer (32-bit signed) only.
 
 ### Contract Automata 
 
-In our model, we have two entities. The first one is the contract automata defined as 
+In our model, we have two entities. The first one is the (timed) contract automata defined as 
 
 ```
 contract <name> {
     input <var> : <type>
     output <var> : <type>
-
+    clock <var> : <type>
+    
     history <var>(<int>)
 
     refines <name> <binding>    
@@ -41,9 +42,10 @@ contract <name> {
 }
 ```
 
-A contract has a name and a signature (input and output variables). Additionally, a state storing the historical values requested by the `history` including the name and depth. A contract can refine another contract for this you can also define a mapping between those. A mapping looks like this `[x <- y, ...]`, where `x` is the variable in the refined contract, and `y` is the variable in the current contract. (No expression currently supported).
+A contract has a name and a signature (input and output variables, additionally clocks for timed contract automata). Additionally, a state storing the historical values requested by the `history` including the name and depth. A contract can refine another contract for this you can also define a mapping between those. A mapping looks like this `[x <- y, ...]`, where `x` is the variable in the refined contract, and `y` is the variable in the current contract. (No expression currently supported).
 
 The special thing about contract automata is the states, which are defined via their mentioning in a transition. A transition goes from one state to the other if the "pre" and "post" (given in double quotes) are fulfilled.
+A state is marked as initial if its name begins with a lowercase letter.
 
 ### System 
 
@@ -137,11 +139,4 @@ The system implementation source file is named after the respective `reactor`.
 The monitor implementation consists of the source file named after the `contract` and the `_monitor` file of the same name that should be compiled together.
 The customization points for the fuzzy implementation are in `fuzzy_impl.hpp`.
 The system and monitor expect a path to the file for sending/receiving the timed input-output traces as the first command line argument.
-
-## Case Study
-
-The case study for the paper is archived in `paper-experiments/`, where you can find `Counter` and `aeb` with their proof obligations, and a make file for discharging the proof. 
-
-To run the case study, you should install `cbmc`, and `nuXmv`. Seahorn is used via `podman` (a docker variant for non-root use).  
-Note that the time measuring of `podman` (`/usr/bin/time podman ...`) does not return the true value of cpu time. 
 
