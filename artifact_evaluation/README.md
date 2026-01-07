@@ -3,13 +3,75 @@
 ## Getting Started
 
 This artifact contains the implementation code for the prototype tool mentioned in the paper `Timed Contract Automata`.
+It consists of a Kotlin tool that generates C++ runtime-monitor source from `.sys` files. Reviewers run the generator, compile the generated C++ with `clang++`, then execute the monitor.
+The artifact is provided as a docker image. The provided image contains Java 21 and `clang++` (C++17), no other tools are required.
+For reuse:
 The kotlin code can be compiled with the shipped gradle, and the generated C++ code requires a C++17 compliant compiler (see Step-by-Step).
 Each .sys file contains the definition of the respective TCA (`contract`) and a possible system implementation (`reactor`) to generate IO-compatible TIO-traces.
+Generated C++ is written into each example’s `rca_output` directory, e.g. `examples/ecs/rca_output`.
 
-## Step-by-step
 
 claim: The tool is able to check system conformance for a given TIO-trace
-How to reproduce:
+
+## Step-by-Step (using Docker)
+
+### 1 — Build the image (run from repo root)
+
+```sh
+docker build -t cagen-artifact:1.0 .
+```
+
+### 2 — Smoke test: check the tool runs
+
+```sh
+docker run --rm cagen-artifact:1.0 --help
+```
+
+Expected: usage/help text from cagen tool.
+
+### 3 — Generate C++ from the `ecs` example
+
+Mount the `examples` directory as `/work`. This is the recommended layout for reviewers.
+
+```sh
+docker run --rm \
+  -v "$PWD/examples":/work:Z \
+  -w /work \
+  cagen-artifact:1.0 \
+  rca ecs/Ecs.sys
+```
+
+This creates `examples/ecs/rca_output` on your host containing the generated `.cpp` files.
+
+### 4 — Compile and run the generated monitor (use `clang++`)
+
+Start an interactive shell in the image with the mounted examples directory, then compile and run.
+
+```sh
+docker run --rm -it \
+  -v "$PWD/examples":/work:Z \
+  -w /work \
+  --entrypoint /bin/bash \
+  cagen-artifact:1.0
+```
+
+Compile the C++ code and run the monitor.
+
+```sh
+# rca_output subdir contains generated C++ code
+cd ecs/rca_output
+ls
+
+# compile runtime monitor
+clang++ SafeEcs.cpp SafeEcs_monitor.cpp -std=c++17 -o safe_ecs
+
+# execute on a TIO-trace
+./safe_ecs trace_delay.txt
+```
+
+## How to re-use:
+
+The kotlin source code is located in `src/`.
 Compile the tool with Gradle by running
 ```sh
 $ ./gradlew shadowJar
@@ -27,7 +89,7 @@ Compile the generated C++ code by running
 cd rca_output/
 clang++ SafeEcs.cpp SafeEcs_monitor.cpp -std=c++17 -o safe_ecs
 ```
-to create the monitor executable (tested using clang 20.1.8 on linux).
+to create the monitor executable.
 When running the monitor, provide a filepath, e.g.,
 ```sh
 ./safe_ecs trace_ok.txt
@@ -57,6 +119,9 @@ The TCAs shown in the paper are:
     - event based gas burner automaton GB_1 (Fig. 1): examples/gasburner/Burner.sys (`contract BurnerControllerEvent`)
     - sampling gas burner automaton GB_2 (Fig. 3): examples/gasburner/Burner.sys (`contract BurnerControllerSample`)
     - floodgate TCA (Fig. 4): examples/ecs/Ecs.sys (`contract EcsOperate`)
+
 To change the TCA definitions, see the syntax definition in the project's *README.md* file.
+New TCAs or system implementations can be added to the existing .sys files, or new experiments can be created.
 Note that we added other features which are not mentioned in the paper (e.g., fuzzy logic evaluation). These are not used in the paper's experiments, but do not affect the mentioned TCAs/systems and can therefore be ignored.
+To modify the C++ code generation, see `src/main/kotlin/cagen/code/CppGen.kt`. This contains all necessary functions for generating system implementation and runtime monitor code.
 
