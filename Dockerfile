@@ -13,9 +13,9 @@ RUN dnf -y update && \
     dnf clean all && rm -rf /var/cache/dnf
 
 COPY --from=builder /src/build/libs/ /opt/cagen/build/libs/
-COPY --from=builder /src/examples /opt/cagen/examples
-COPY --from=builder /src/artifact_evaluation /opt/cagen/artifact_evaluation
-COPY --from=builder /src/README.md /opt/cagen/README.md
+COPY --from=builder /src/examples/gasburner /opt/cagen/examples/gasburner
+COPY --from=builder /src/examples/mine_pump /opt/cagen/examples/mine_pump
+COPY --from=builder /src/examples/ecs /opt/cagen/examples/ecs
 
 ENTRYPOINT ["java","-jar","/opt/cagen/build/libs/cagen-all.jar"]
 
